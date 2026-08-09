@@ -1,20 +1,20 @@
-import { Component, Input, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { PlatformPipe } from '@components/platform.pipe';
-import { AnnComponent } from '@external/ann/ann.component';
-import { BakamangaComponent } from '@external/bakamanga/bakamanga.component';
-import { KitsuComponent } from '@external/kitsu/kitsu.component';
 import { ExtRating, Weekday } from '@models/components';
-import { Manga, MangaExtension, MyMangaUpdate, ReadStatus } from '@models/manga';
+import { Manga, MyMangaUpdateExtended, ReadStatus } from '@models/manga';
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap';
 import { AnilistService } from '@services/anilist.service';
+import { BangumiService } from '@services/anime/bangumi.service';
 import { AnisearchService } from '@services/anisearch.service';
 import { AnnService } from '@services/ann.service';
 import { CacheService } from '@services/cache.service';
 import { DialogueService } from '@services/dialogue.service';
 import { GlobalService } from '@services/global.service';
 import { KitsuService } from '@services/kitsu.service';
+import { MalService } from '@services/mal.service';
 import { MangaService } from '@services/manga/manga.service';
+import { MangabakaService } from '@services/manga/mangabaka.service';
 import { MangadexService } from '@services/manga/mangadex.service';
 import { MangapassionService } from '@services/manga/mangapassion.service';
 import { MangaupdatesService } from '@services/manga/mangaupdates.service';
@@ -22,10 +22,13 @@ import { ShikimoriService } from '@services/shikimori.service';
 import { Base64 } from 'js-base64';
 import { DateTime } from 'luxon';
 
+import { MangaEditComponent } from './edit/manga-edit.component';
+
 @Component({
   selector: 'myanili-manga-details',
   templateUrl: './details.component.html',
   styleUrls: ['./details.component.scss'],
+  changeDetection: ChangeDetectionStrategy.Eager,
   standalone: false,
 })
 export class MangaDetailsComponent implements OnInit {
@@ -34,14 +37,13 @@ export class MangaDetailsComponent implements OnInit {
   manga?: Manga;
   title?: string;
   shortsyn = true;
-  edit = false;
   fromCache = false;
   busy = false;
-  editBackup?: Partial<MyMangaUpdate>;
-  editExtension?: MangaExtension;
   ratings: Array<{ provider: string; rating: ExtRating }> = [];
   activeTab = 1;
   originalLanguage = 'Japanese';
+  animePlanetId?: number;
+  loggedIn: string | false = false;
 
   constructor(
     private mangaService: MangaService,
@@ -54,11 +56,14 @@ export class MangaDetailsComponent implements OnInit {
     private baka: MangaupdatesService,
     private mangadex: MangadexService,
     private mangapassion: MangapassionService,
+    private bangumi: BangumiService,
+    private mangabaka: MangabakaService,
     private anisearch: AnisearchService,
     private ann: AnnService,
     private modalService: NgbModal,
     private cache: CacheService,
     private dialogue: DialogueService,
+    private malService: MalService,
   ) {
     this.route.paramMap.subscribe(async params => {
       const newId = Number(params.get('id'));
@@ -67,9 +72,11 @@ export class MangaDetailsComponent implements OnInit {
         this.id = newId;
         delete this.title;
         delete this.manga;
-        this.glob.busy();
         await this.ngOnInit();
       }
+    });
+    this.malService.loggedIn.subscribe(loggedIn => {
+      if (loggedIn !== '***loading***') this.loggedIn = loggedIn;
     });
   }
 
@@ -82,7 +89,6 @@ export class MangaDetailsComponent implements OnInit {
           this.title = mangaCached.title;
           this.fromCache = true;
           this.glob.setTitle(mangaCached.title);
-          this.glob.notbusy();
         }
       })
       .catch(() => {});
@@ -113,7 +119,6 @@ export class MangaDetailsComponent implements OnInit {
         if (this.manga) this.manga.related_anime = relatedAnime;
       });
     }
-    this.glob.notbusy();
     await this.getRatings();
   }
 
@@ -195,6 +200,15 @@ export class MangaDetailsComponent implements OnInit {
           }),
       );
     }
+    if (!this.manga.my_extension.bangumiId) {
+      promises.push(
+        this.bangumi.getId(manga.alternative_titles?.ja || manga.title, 'manga').then(bangumiId => {
+          if (bangumiId && this?.manga?.my_extension) {
+            this.manga.my_extension.bangumiId = bangumiId;
+          }
+        }),
+      );
+    }
     if (!this.manga.my_extension.mdId) {
       promises.push(
         this.mangadex.getByMalId(this.manga.id, this.manga.title).then(mdmanga => {
@@ -220,221 +234,185 @@ export class MangaDetailsComponent implements OnInit {
         }),
       );
     }
+    if (!this.manga.my_extension.mangabakaId) {
+      promises.push(
+        (async () => {
+          let mbSeries;
+
+          // Try AniList ID mapping first
+          if (this.manga?.my_extension?.anilistId) {
+            try {
+              const mbSerieses = await this.mangabaka.mapFromSource(
+                'anilist',
+                this.manga.my_extension.anilistId,
+              );
+              mbSeries = mbSerieses?.[0];
+              if (mbSeries && this?.manga?.my_extension) {
+                this.manga.my_extension.mangabakaId = mbSeries.id;
+              }
+            } catch (error) {
+              console.log('MangaBaka AniList mapping failed:', error);
+            }
+          }
+
+          // Fallback to MAL ID mapping
+          if (!mbSeries && this.manga?.id) {
+            try {
+              const mbSerieses = await this.mangabaka.mapFromSource('my-anime-list', this.manga.id);
+              mbSeries = mbSerieses?.[0];
+              if (mbSeries && this?.manga?.my_extension) {
+                this.manga.my_extension.mangabakaId = mbSeries.id;
+              }
+            } catch (error) {
+              console.log('MangaBaka MAL mapping failed:', error);
+            }
+          }
+
+          // Extract additional IDs from MangaBaka source data
+          if (mbSeries && this?.manga?.my_extension) {
+            // Anime News Network ID (provides fallback/enhancement to direct ANN lookup)
+            if (!this.manga.my_extension.annId && mbSeries.source?.anime_news_network?.id) {
+              this.manga.my_extension.annId = mbSeries.source.anime_news_network.id;
+            }
+
+            // Anime-Planet ID (temporary - not persisted, used for link display only)
+            if (mbSeries.source?.anime_planet?.id) {
+              // Store temporarily on component for link generation
+              this.animePlanetId = mbSeries.source.anime_planet.id;
+            }
+          }
+        })(),
+      );
+    }
     await Promise.all(promises);
     if (promises.length && manga.my_extension && manga.my_list_status) {
-      await this.mangaService.updateManga(
-        {
-          malId: manga.id,
-          kitsuId: this.manga.my_extension.kitsuId,
-          anilistId: this.manga.my_extension.anilistId,
-        },
-        {
-          status: manga.my_list_status.status,
-          is_rereading: manga.my_list_status.is_rereading,
-          extension: Base64.encode(
-            JSON.stringify({
-              ...manga.my_extension,
-              kitsuId: this.manga.my_extension.kitsuId,
-              anilistId: this.manga.my_extension.anilistId,
-              anisearchId: this.manga.my_extension.anisearchId,
-              bakaId: this.manga.my_extension.bakaId,
-              annId: this.manga.my_extension.annId,
-              mdId: this.manga.my_extension.mdId,
-              mpasId: this.manga.my_extension.mpasId,
-            }),
-          ),
-        },
-      );
+      await this.mangaService.updateManga(this.manga, {
+        status: manga.my_list_status.status || 'plan_to_read',
+        is_rereading: manga.my_list_status.is_rereading,
+        extension: Base64.encode(
+          JSON.stringify({
+            ...manga.my_extension,
+            kitsuId: this.manga.my_extension.kitsuId,
+            anilistId: this.manga.my_extension.anilistId,
+            anisearchId: this.manga.my_extension.anisearchId,
+            bakaId: this.manga.my_extension.bakaId,
+            mangabakaId: this.manga.my_extension.mangabakaId,
+            bangumiId: this.manga.my_extension.bangumiId,
+            annId: this.manga.my_extension.annId,
+            mdId: this.manga.my_extension.mdId,
+            mpasId: this.manga.my_extension.mpasId,
+          }),
+        ),
+      });
     }
   }
 
   async editSave() {
     if (this.busy) return;
     if (this.manga?.my_list_status) {
-      if (this.edit) return this.save();
-      this.startEdit();
+      this.openEditModal();
     } else {
       this.setStatus('plan_to_read');
     }
   }
 
-  async startEdit() {
-    if (!this.manga?.my_list_status) return;
-    this.edit = true;
-    this.editBackup = {
-      status: this.manga.my_list_status.status || 'plan_to_read',
-      is_rereading: this.manga.my_list_status.is_rereading,
-      score: this.manga.my_list_status.score,
-      num_chapters_read: this.manga.my_list_status.num_chapters_read,
-      num_volumes_read: this.manga.my_list_status.num_volumes_read,
-      priority: this.manga.my_list_status.priority,
-      reread_value: this.manga.my_list_status.reread_value,
-      start_date: this.manga.my_list_status.start_date,
-      finish_date: this.manga.my_list_status.finish_date,
-      tags: this.manga.my_list_status.tags,
-    };
-    try {
-      const extension = JSON.parse(
-        Base64.decode(this.manga.my_list_status.comments),
-      ) as unknown as Partial<MangaExtension>;
-      this.editExtension = {
-        ...this.manga.my_extension,
-        ...extension,
-      };
-    } catch (e) {
-      this.editExtension = { ...this.manga.my_extension };
-    }
-  }
+  async openEditModal() {
+    if (!this.manga) return;
 
-  enableKitsu() {
-    if (!this.editExtension) return false;
-    if (!this.editExtension.kitsuId) {
-      this.editExtension.kitsuId = { kitsuId: '' };
-    }
-    return true;
-  }
+    const modal = this.modalService.open(MangaEditComponent, { size: 'xl' });
+    modal.componentInstance.manga = this.manga;
 
-  async save() {
-    if (!this.manga?.my_list_status) return;
-    if (!this.editBackup) {
-      this.edit = false;
-      return;
-    }
-    this.busy = true;
-    const updateData = {
-      comments: this.editExtension?.comment || '',
-      extension: Base64.encode(JSON.stringify(this.editExtension)),
-    } as Partial<MyMangaUpdate>;
-    if (this.editBackup.status !== this.manga.my_list_status.status) {
-      updateData.status = this.editBackup?.status;
-    }
-    if (this.editBackup.is_rereading !== this.manga.my_list_status.is_rereading) {
-      updateData.is_rereading = this.editBackup?.is_rereading;
-    }
-    if (this.editBackup.score !== this.manga.my_list_status.score) {
-      updateData.score = this.editBackup?.score;
-    }
-    if (this.editBackup.num_chapters_read !== this.manga.my_list_status.num_chapters_read) {
-      updateData.num_chapters_read = this.editBackup?.num_chapters_read;
-    }
-    if (this.editBackup.num_volumes_read !== this.manga.my_list_status.num_volumes_read) {
-      updateData.num_volumes_read = this.editBackup?.num_volumes_read;
-    }
-    if (this.editBackup.priority !== this.manga.my_list_status.priority) {
-      updateData.priority = this.editBackup?.priority;
-    }
-    if (this.editBackup.reread_value !== this.manga.my_list_status.reread_value) {
-      updateData.reread_value = this.editBackup?.reread_value;
-    }
-    if (this.editBackup.tags !== this.manga.my_list_status.tags) {
-      updateData.tags = this.editBackup?.tags;
-    }
-    if (this.editBackup.start_date !== this.manga.my_list_status.start_date) {
-      updateData.start_date = this.editBackup?.start_date;
-    }
-    if (this.editBackup.finish_date !== this.manga.my_list_status.finish_date) {
-      updateData.finish_date = this.editBackup?.finish_date;
-    }
-    await this.mangaService.updateManga(
-      {
-        malId: this.manga.id,
-        anilistId: this.manga.my_extension?.anilistId,
-        kitsuId: this.manga.my_extension?.kitsuId,
-        bakaId: this.manga.my_extension?.bakaId,
-      },
-      updateData,
-    );
-    this.stopEdit();
-    await this.ngOnInit();
-    this.busy = false;
-  }
-
-  stopEdit() {
-    this.edit = false;
-    delete this.editBackup;
-    delete this.editExtension;
+    modal.closed.subscribe(async result => {
+      if (result === 'deleted') {
+        // Entry was deleted, reload component to handle missing data
+        await this.ngOnInit();
+      } else if (result) {
+        // Reload component data after successful save
+        await this.ngOnInit();
+      }
+    });
   }
 
   async setStatus(status: ReadStatus) {
     if (!this.manga) return;
     this.glob.busy();
     this.busy = true;
-    const data = { status } as Partial<MyMangaUpdate>;
-    if (status === 'reading' && !this.manga.my_list_status?.start_date) {
-      data.start_date = DateTime.local().toISODate() || undefined;
+    try {
+      const data = { status, is_rereading: false } as MyMangaUpdateExtended;
+      if (status === 'reading' && !this.manga.my_list_status?.start_date) {
+        data.start_date = DateTime.local().toISODate() || undefined;
+      }
+      await this.mangaService.updateManga(this.manga, data);
+      await this.ngOnInit();
+    } finally {
+      this.glob.notbusy();
+      this.busy = false;
     }
-    await this.mangaService.updateManga(
-      {
-        malId: this.manga.id,
-        anilistId: this.manga.my_extension?.anilistId,
-        kitsuId: this.manga.my_extension?.kitsuId,
-        bakaId: this.manga.my_extension?.bakaId,
-      },
-      data,
-    );
-    await this.ngOnInit();
-    this.busy = false;
   }
 
   async reread() {
     if (!this.manga) return;
     this.glob.busy();
     this.busy = true;
-    await this.mangaService.updateManga(
-      {
-        malId: this.manga.id,
-        anilistId: this.manga.my_extension?.anilistId,
-        kitsuId: this.manga.my_extension?.kitsuId,
-      },
-      {
+    try {
+      await this.mangaService.updateManga(this.manga, {
         status: 'completed',
         is_rereading: true,
         num_chapters_read: 0,
         num_volumes_read: 0,
-      },
-    );
-    await this.ngOnInit();
-    this.busy = false;
+      });
+      await this.ngOnInit();
+    } finally {
+      this.glob.notbusy();
+      this.busy = false;
+    }
   }
 
   async startOver() {
     if (!this.manga) return;
     this.glob.busy();
     this.busy = true;
-    if (
-      !(await this.dialogue.confirm(
-        `Are you sure you want to read "${this.manga.title}" from the start again?`,
-        'Start over',
-      ))
-    ) {
-      this.busy = false;
-      this.glob.notbusy();
-      return;
-    }
-    await this.mangaService.updateManga(
-      {
-        malId: this.manga.id,
-        anilistId: this.manga.my_extension?.anilistId,
-        kitsuId: this.manga.my_extension?.kitsuId,
-        bakaId: this.manga.my_extension?.bakaId,
-      },
-      {
+    try {
+      if (
+        !(await this.dialogue.confirm(
+          `Are you sure you want to read "${this.manga.title}" from the start again?`,
+          'Start over',
+        ))
+      ) {
+        return;
+      }
+      await this.mangaService.updateManga(this.manga, {
         status: 'reading',
+        is_rereading: false,
         num_chapters_read: 0,
         num_volumes_read: 0,
         start_date: DateTime.local().toISODate() || undefined,
-      },
-    );
-    await this.ngOnInit();
-    this.busy = false;
+      });
+      await this.ngOnInit();
+    } finally {
+      this.glob.notbusy();
+      this.busy = false;
+    }
   }
 
   async plusOne(type: 'chapter' | 'volume') {
     if (!this.manga || !this.manga.my_list_status) return;
     this.glob.busy();
-    const currentChapter = this.manga.my_list_status?.num_chapters_read || 0;
-    const currentVolume = this.manga.my_list_status?.num_volumes_read || 0;
-    const data = {} as Partial<MyMangaUpdate>;
+    try {
+      await this.doPlusOne(type);
+    } finally {
+      this.glob.notbusy();
+    }
+  }
+
+  private async doPlusOne(type: 'chapter' | 'volume') {
+    if (!this.manga || !this.manga.my_list_status) return;
+    const currentChapter = this.manga.my_list_status.num_chapters_read || 0;
+    const currentVolume = this.manga.my_list_status.num_volumes_read || 0;
+    const data = {
+      status: this.manga.my_list_status.status,
+      is_rereading: this.manga.my_list_status.is_rereading,
+    } as MyMangaUpdateExtended;
     const mdId = this.manga.my_extension?.mdId;
     if (type === 'volume') {
       data.num_volumes_read = currentVolume + 1;
@@ -460,13 +438,13 @@ export class MangaDetailsComponent implements OnInit {
       !data.num_chapters_read
     ) {
       data.num_chapters_read = Math.max(
-        this.manga.my_list_status?.num_chapters_read || 0,
+        this.manga.my_list_status.num_chapters_read || 0,
         Math.floor(((currentVolume + 1) / this.manga.num_volumes) * this.manga.num_chapters),
       );
     }
     if (
-      data.num_volumes_read === this.manga.num_volumes ||
-      data.num_chapters_read === this.manga.num_chapters
+      ((data.num_volumes_read || 0) > 0 && data.num_volumes_read === this.manga.num_volumes) ||
+      ((data.num_chapters_read || 0) > 0 && data.num_chapters_read === this.manga.num_chapters)
     ) {
       data.status = 'completed';
       data.finish_date =
@@ -475,22 +453,18 @@ export class MangaDetailsComponent implements OnInit {
       if (this.manga.my_list_status.is_rereading) {
         data.num_times_reread = this.manga.my_list_status.num_times_reread + 1 || 1;
       }
-      if (this.manga.num_chapters) data.num_chapters_read = this.manga.num_chapters;
-      if (this.manga.num_volumes) data.num_volumes_read = this.manga.num_volumes;
+      if (this.manga.num_chapters) {
+        data.num_chapters_read = this.manga.num_chapters;
+      }
+      if (this.manga.num_volumes) {
+        data.num_volumes_read = this.manga.num_volumes;
+      }
       if (!this.manga.my_list_status?.score) {
         const myScore = await this.dialogue.rating(this.manga.title);
         if (myScore > 0 && myScore <= 10) data.score = myScore;
       }
     }
-    const statusResponse = await this.mangaService.updateManga(
-      {
-        malId: this.manga.id,
-        anilistId: this.manga.my_extension?.anilistId,
-        kitsuId: this.manga.my_extension?.kitsuId,
-        bakaId: this.manga.my_extension?.bakaId,
-      },
-      data,
-    );
+    const statusResponse = await this.mangaService.updateManga(this.manga, data);
     this.manga.my_list_status.num_chapters_read = statusResponse.num_chapters_read;
     this.manga.my_list_status.num_volumes_read = statusResponse.num_volumes_read;
     this.manga.my_list_status.status = statusResponse.status;
@@ -500,7 +474,6 @@ export class MangaDetailsComponent implements OnInit {
     this.manga.my_list_status.updated_at = statusResponse.updated_at;
     this.manga.my_list_status.start_date = statusResponse.start_date;
     this.manga.my_list_status.finish_date = statusResponse.finish_date;
-    this.glob.notbusy();
   }
 
   async deleteEntry(): Promise<boolean> {
@@ -515,15 +488,13 @@ export class MangaDetailsComponent implements OnInit {
     }
     this.glob.busy();
     this.busy = true;
-    await this.mangaService.deleteManga({
-      malId: this.manga.id,
-      anilistId: this.manga.my_extension?.anilistId,
-      kitsuId: this.manga.my_extension?.kitsuId,
-    });
-    this.edit = false;
-    await this.ngOnInit();
-    this.glob.notbusy();
-    this.busy = false;
+    try {
+      await this.mangaService.deleteManga(this.manga);
+      await this.ngOnInit();
+    } finally {
+      this.glob.notbusy();
+      this.busy = false;
+    }
     return true;
   }
 
@@ -579,9 +550,9 @@ export class MangaDetailsComponent implements OnInit {
       this.mangaService.getBakaManga(this.manga?.my_extension?.bakaId).then(bakaManga => {
         if (bakaManga) {
           this.setRating('bu', {
-            nom: bakaManga.score || 0,
-            norm: (bakaManga.score || 0) * 10,
-            ratings: bakaManga.votes,
+            nom: bakaManga.bayesian_rating || 0,
+            norm: (bakaManga.bayesian_rating || 0) * 10,
+            ratings: bakaManga.rating_votes,
           });
         }
       });
@@ -622,10 +593,31 @@ export class MangaDetailsComponent implements OnInit {
         this.setRating('ann', rating);
       });
     }
+    if (!this.getRating('mangabaka')) {
+      const mangabakaId = this.manga?.my_extension?.mangabakaId;
+      if (mangabakaId) {
+        this.mangabaka.getSeries(mangabakaId).then(series => {
+          if (series?.rating) {
+            this.setRating('mangabaka', {
+              nom: series.rating,
+              norm: series.rating,
+              unit: '%',
+            });
+          }
+        });
+      }
+    }
+    if (!this.getRating('bangumi')) {
+      this.bangumi.getRating(this.manga?.my_extension?.bangumiId).then(rating => {
+        this.setRating('bangumi', rating);
+      });
+    }
   }
 
   get meanRating(): number {
-    if (this.manga?.my_list_status?.score) return this.manga?.my_list_status?.score * 10;
+    if (this.manga?.my_list_status?.score) {
+      return this.manga?.my_list_status?.score * 10;
+    }
     let count = 0;
     const weighted = this.ratings.map(rating => {
       count += rating.rating.ratings || 0;
@@ -652,61 +644,6 @@ export class MangaDetailsComponent implements OnInit {
     }
   }
 
-  changeOngoing() {
-    const ongoing = !this.editExtension?.ongoing;
-    if (!this.editExtension) this.editExtension = { ongoing };
-    this.editExtension.ongoing = ongoing;
-  }
-
-  changeShelf() {
-    const hideShelf = !this.editExtension?.hideShelf;
-    if (!this.editExtension) this.editExtension = { hideShelf };
-    this.editExtension.hideShelf = hideShelf;
-  }
-
-  async findKitsu() {
-    if (!this.manga || !this.editExtension) return;
-    const modal = this.modalService.open(KitsuComponent);
-    modal.componentInstance.type = 'manga';
-    modal.componentInstance.title = this.manga.title;
-    modal.closed.subscribe((value: number) => {
-      if (this.editExtension) this.editExtension.kitsuId = { kitsuId: Number(value) };
-    });
-  }
-
-  /** @deprecated doesn't work anymore */
-  async findAnisearch() {
-    return;
-    // if (!this.manga || !this.editExtension) return;
-    // const modal = this.modalService.open(AnisearchComponent);
-    // modal.componentInstance.title = this.manga.title;
-    // modal.componentInstance.type = 'manga';
-    // modal.closed.subscribe((value: number) => {
-    //   if (this.editExtension) this.editExtension.anisearchId = Number(value);
-    // });
-  }
-
-  async findBaka() {
-    if (!this.manga || !this.editExtension) return;
-    const modal = this.modalService.open(BakamangaComponent);
-    modal.componentInstance.title = this.manga.title;
-    modal.closed.subscribe((value: string) => {
-      if (this.editExtension) this.editExtension.bakaId = value;
-    });
-  }
-
-  async findANN() {
-    if (!this.manga || !this.editExtension) return;
-    const modal = this.modalService.open(AnnComponent);
-    modal.componentInstance.title = this.manga.title;
-    modal.componentInstance.title =
-      this.manga.alternative_titles?.en?.replace(/^The /, '') || this.manga.title;
-    modal.componentInstance.type = 'manga';
-    modal.closed.subscribe((value: number) => {
-      if (this.editExtension) this.editExtension.annId = Number(value);
-    });
-  }
-
   getBakaUrl() {
     if (!this.manga?.my_extension?.bakaId) {
       return `https://www.mangaupdates.com/series.html?search=${this.manga?.title}`;
@@ -728,9 +665,21 @@ export class MangaDetailsComponent implements OnInit {
     if (!simulpub) return '';
     return simulpub
       .map(day => {
-        const date = DateTime.local().set({ weekday: this.glob.toWeekday(day) });
+        const date = DateTime.local().set({
+          weekday: this.glob.toWeekday(day),
+        });
         return date.weekdayLong;
       })
       .join(', ');
+  }
+
+  /** publisher logo asset name, normalized like the platform widget ("Carlsen Manga" → "carlsen") */
+  get publisherLogo(): string | undefined {
+    const publisher = this.manga?.my_extension?.publisher;
+    if (!publisher) return undefined;
+    return publisher
+      .toLowerCase()
+      .replace(/manga\s*$/, '')
+      .replace(/\s/g, '');
   }
 }

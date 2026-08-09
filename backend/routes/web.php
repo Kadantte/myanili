@@ -6,6 +6,8 @@ use App\Providers\AnilistServiceProvider as AnilistServiceProvider;
 use App\Providers\AnnictServiceProvider as AnnictServiceProvider;
 use App\Providers\BakaServiceProvider as BakaServiceProvider;
 use App\Providers\MalServiceProvider as MalServiceProvider;
+use App\Providers\BangumiServiceProvider as BangumiServiceProvider;
+use App\Providers\MangabakaServiceProvider as MangabakaServiceProvider;
 use App\Providers\SimklServiceProvider as SimklServiceProvider;
 use App\Providers\TraktServiceProvider as TraktServiceProvider;
 use Illuminate\Http\Request;
@@ -65,7 +67,7 @@ $router->get('/auth', function () {
             $javascript = "";
             foreach (explode(',', env('APP_CLIENT')) as $opener) {
                 $javascript .= <<<JAVASCRIPT
-                    window.opener.postMessage(true, "$opener");
+                    window.opener.postMessage({mal: true}, "$opener");
 JAVASCRIPT;
             }
 
@@ -425,11 +427,83 @@ JAVASCRIPT;
             }
             return "<script>$javascript</script>";
         } catch (\League\OAuth2\Client\Provider\Exception\IdentityProviderException $e) {
+            // Failed to get the access token or user details.
+            return ($e->getMessage());
+        }
+    }
+});
+
+/**
+ *  __  __                       ___        _
+ * |  \/  |__ _ _ _  __ _ __ _  | _ ) __ _| |__ __ _
+ * | |\/| / _` | ' \/ _` / _` | | _ \/ _` | / / _` |
+ * |_|  |_\__,_|_||_\__, \__,_| |___/\__,_|_\_\__,_|
+ *                      |___/
+ */
+
+$router->get('/mangabaka/auth', function () {
+    $code_verifier = isset($_SESSION['mangabaka_verifier']) ? $_SESSION['mangabaka_verifier'] : rtrim(strtr(base64_encode(random_bytes(64)), "+/", "-_"), "=");
+    $_SESSION['mangabaka_verifier'] = $code_verifier;
+    $code_challenge = rtrim(strtr(base64_encode(hash('sha256', $code_verifier, true)), '+/', '-_'), '=');
+
+    $provider = MangabakaServiceProvider::getOauthProvider();
+    if (!isset($_GET['code'])) {
+        $authorizationUrl = $provider->getAuthorizationUrl([
+            "response_type" => 'code',
+            'scope' => 'openid profile library.read library.write',
+            'code_challenge' => $code_challenge,
+            'code_challenge_method' => 'S256',
+        ]);
+        $_SESSION['oauth2state'] = $provider->getState();
+        header('Location: ' . $authorizationUrl);
+        exit;
+
+        // Check given state against previously stored one to mitigate CSRF attack
+    } elseif (empty($_GET['state']) || (isset($_SESSION['oauth2state']) && $_GET['state'] !== $_SESSION['oauth2state'])) {
+
+        if (isset($_SESSION['oauth2state'])) {
+            unset($_SESSION['oauth2state']);
+        }
+
+        exit('Invalid state');
+    } else {
+        try {
+            $accessToken = $provider->getAccessToken('authorization_code', [
+                'code' => $_GET['code'],
+                'grant_type' => 'authorization_code',
+                'code_verifier' => $code_verifier,
+            ]);
+
+            setcookie('MANGABAKA_ACCESS_TOKEN', $accessToken->getToken(), $accessToken->getExpires());
+            setcookie('MANGABAKA_REFRESH_TOKEN', $accessToken->getRefreshToken(), $accessToken->getExpires() + (30 * 24 * 60 * 60));
+            $javascript = "";
+            $clientId = env('MANGABAKA_CLIENT_ID');
+            foreach (explode(',', env('APP_CLIENT')) as $opener) {
+                $javascript .= <<<JAVASCRIPT
+                    window.opener.postMessage({at:"{$accessToken->getToken()}",rt:"{$accessToken->getRefreshToken()}",ex:"{$accessToken->getExpires()}",ci:"{$clientId}",mangabaka:true}, "$opener");
+JAVASCRIPT;
+            }
+            return "<script>$javascript</script>";
+        } catch (\League\OAuth2\Client\Provider\Exception\IdentityProviderException $e) {
 
             // Failed to get the access token or user details.
             return ($e->getMessage());
         }
     }
+});
+
+$router->get('/mangabaka/userinfo', function () {
+    $authHeader = isset($_SERVER['HTTP_AUTHORIZATION']) ? $_SERVER['HTTP_AUTHORIZATION'] : '';
+    if (empty($authHeader)) {
+        http_response_code(401);
+        header('Content-Type: application/json');
+        return json_encode(['error' => 'No authorization header']);
+    }
+
+    $result = MangabakaServiceProvider::getUserInfo($authHeader);
+    http_response_code($result['status']);
+    header('Content-Type: application/json');
+    return $result['body'];
 });
 
 /**
@@ -442,4 +516,79 @@ JAVASCRIPT;
 
 $router->get('/baka/{id}', function ($id) {
     return BakaServiceProvider::getManga($id);
+});
+
+/*
+ *  ____                                    _
+ * | __ )  __ _ _ __   __ _ _   _ _ __ ___ (_)
+ * |  _ \ / _` | '_ \ / _` | | | | '_ ` _ \| |
+ * | |_) | (_| | | | | (_| | |_| | | | | | | |
+ * |____/ \__,_|_| |_|\__, |\__,_|_| |_| |_|_|
+ *                    |___/
+ */
+
+$router->get('/bangumi/auth', function () {
+    $provider = BangumiServiceProvider::getOauthProvider();
+    if (!isset($_GET['code'])) {
+        $authorizationUrl = $provider->getAuthorizationUrl();
+        $_SESSION['oauth2state'] = $provider->getState();
+        header('Location: ' . $authorizationUrl);
+        exit;
+    } elseif (empty($_GET['state']) || (isset($_SESSION['oauth2state']) && $_GET['state'] !== $_SESSION['oauth2state'])) {
+        if (isset($_SESSION['oauth2state'])) {
+            unset($_SESSION['oauth2state']);
+        }
+        exit('Invalid state');
+    } else {
+        try {
+            $accessToken = $provider->getAccessToken('authorization_code', [
+                'code' => $_GET['code'],
+            ]);
+            setcookie('BANGUMI_ACCESS_TOKEN', $accessToken->getToken(), $accessToken->getExpires());
+            setcookie('BANGUMI_REFRESH_TOKEN', $accessToken->getRefreshToken(), $accessToken->getExpires() + (30 * 24 * 60 * 60));
+            $javascript = "";
+            $clientId = env('BANGUMI_CLIENT_ID');
+            foreach (explode(',', env('APP_CLIENT')) as $opener) {
+                $javascript .= <<<JAVASCRIPT
+                    window.opener.postMessage({at:"{$accessToken->getToken()}",rt:"{$accessToken->getRefreshToken()}",ex:"{$accessToken->getExpires()}",ci:"{$clientId}",bangumi:true}, "$opener");
+JAVASCRIPT;
+            }
+            return "<script>$javascript</script>";
+        } catch (\League\OAuth2\Client\Provider\Exception\IdentityProviderException $e) {
+            return ($e->getMessage());
+        }
+    }
+});
+
+$router->get('/bangumi/token', function () {
+    try {
+        $provider = BangumiServiceProvider::getOauthProvider();
+        $refreshToken = $_GET['refresh_token'];
+        $accessToken = $provider->getAccessToken('refresh_token', [
+            'refresh_token' => $refreshToken,
+        ]);
+        return response()->json([
+            'access_token' => $accessToken->getToken(),
+            'refresh_token' => $accessToken->getRefreshToken(),
+            'expires' => $accessToken->getExpires(),
+        ], 201);
+    } catch (\League\OAuth2\Client\Provider\Exception\IdentityProviderException $e) {
+        return response()->json([
+            'error' => $e->getMessage(),
+        ], 401);
+    }
+});
+
+$router->get('/bangumi/userinfo', function () {
+    $authHeader = isset($_SERVER['HTTP_AUTHORIZATION']) ? $_SERVER['HTTP_AUTHORIZATION'] : '';
+    if (empty($authHeader)) {
+        http_response_code(401);
+        header('Content-Type: application/json');
+        return json_encode(['error' => 'No authorization header']);
+    }
+
+    $result = BangumiServiceProvider::getUserInfo($authHeader);
+    http_response_code($result['status']);
+    header('Content-Type: application/json');
+    return $result['body'];
 });

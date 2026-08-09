@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
 import { BakaList, BakaSeries, BakaUser, ListType } from '@models/baka';
 import { BakaManga, Manga, ReadStatus } from '@models/manga';
+import { ConnectionStatusService } from '@services/connection-status.service';
+import { readStoredToken } from '@services/global.service';
 import { BehaviorSubject } from 'rxjs';
 import { environment } from 'src/environments/environment';
 import { compareTwoStrings } from 'string-similarity';
@@ -14,13 +16,29 @@ export class MangaupdatesService {
   private userSubject = new BehaviorSubject<BakaUser | undefined>(undefined);
   private myLists?: BakaList[];
 
-  constructor() {
-    this.accessToken = String(localStorage.getItem('bakaAccessToken'));
-    if (this.accessToken && this.accessToken !== 'null') {
-      this.login().then(user => {
-        this.userSubject.next(user);
-      });
+  constructor(private connection: ConnectionStatusService) {
+    this.accessToken = readStoredToken('bakaAccessToken');
+    if (this.accessToken) {
+      this.login()
+        .then(user => {
+          this.userSubject.next(user);
+          if (user) {
+            this.connection.clearError('baka');
+          } else {
+            this.reportConnectionError();
+          }
+        })
+        .catch(() => {
+          this.reportConnectionError();
+        });
     }
+  }
+
+  private reportConnectionError() {
+    this.connection.reportError(
+      'baka',
+      'Could not verify your MangaUpdates session. It may have expired – reconnect to renew it.',
+    );
   }
 
   async login(
@@ -55,12 +73,14 @@ export class MangaupdatesService {
     if (!result.ok) return undefined;
     const response = (await result.json()) as BakaUser;
     this.userSubject.next(response);
+    this.connection.clearError('baka');
     return response;
   }
 
   logoff() {
     this.accessToken = '';
     this.userSubject.next(undefined);
+    this.connection.clearError('baka');
     localStorage.removeItem('bakaAccessToken');
   }
 
@@ -79,7 +99,7 @@ export class MangaupdatesService {
     const request = await fetch(`${environment.backend}baka/manga/${idOrSlug}`);
     if (request.ok) {
       const response = (await request.json()) as BakaManga;
-      return response.id;
+      return response.series_id;
     }
     return;
   }
@@ -147,7 +167,7 @@ export class MangaupdatesService {
     data: { chapters?: number; volumes?: number; list?: ListType; rating?: number },
   ) {
     if (!id) return;
-    if (data.rating) this.addRating(id, data.rating);
+    if (data.rating) await this.addRating(id, data.rating);
     const updateData = {
       series: { id },
     } as {
@@ -169,7 +189,7 @@ export class MangaupdatesService {
           'Content-Type': 'application/json',
         }),
       });
-      if (!listsResponse.ok) return;
+      if (!listsResponse.ok) throw new Error(`MangaUpdates: HTTP ${listsResponse.status}`);
       this.myLists = (await listsResponse.json()) as BakaList[];
     }
     const newList = this.myLists.find(list => list.type === data.list);
@@ -185,7 +205,7 @@ export class MangaupdatesService {
     });
     if (updateResponse.ok) return;
 
-    await fetch(`${this.baseUrl}lists/series`, {
+    const createResponse = await fetch(`${this.baseUrl}lists/series`, {
       method: 'POST',
       headers: new Headers({
         Authorization: `Bearer ${this.accessToken}`,
@@ -193,10 +213,11 @@ export class MangaupdatesService {
       }),
       body: JSON.stringify([updateData]),
     });
+    if (!createResponse.ok) throw new Error(`MangaUpdates: HTTP ${createResponse.status}`);
   }
 
   async addRating(id: number, rating: number) {
-    await fetch(`${this.baseUrl}series/${id}/rating`, {
+    const response = await fetch(`${this.baseUrl}series/${id}/rating`, {
       method: 'PUT',
       headers: new Headers({
         Authorization: `Bearer ${this.accessToken}`,
@@ -204,6 +225,7 @@ export class MangaupdatesService {
       }),
       body: JSON.stringify({ rating }),
     });
+    if (!response.ok) throw new Error(`MangaUpdates: HTTP ${response.status}`);
   }
 
   statusFromMal(malStatus?: ReadStatus): ListType | undefined {

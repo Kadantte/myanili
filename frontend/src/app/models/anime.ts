@@ -42,6 +42,8 @@ export interface Anime {
     weekday?: number;
     day_of_the_week: string;
     start_time?: string;
+    /** days to add to start_date/end_date to get the local air date (-1, 0 or 1) */
+    dateShift?: number;
   };
   source?: string;
   average_episode_duration?: number;
@@ -105,6 +107,11 @@ export interface MyAnimeUpdate {
   extension: string;
 }
 
+export interface MyAnimeUpdateExtended extends Partial<MyAnimeUpdate> {
+  status: WatchStatus;
+  is_rewatching: boolean;
+}
+
 export interface MalSeason {
   year: number;
   season: 'winter' | 'spring' | 'summer' | 'fall';
@@ -135,6 +142,8 @@ export interface AnimeNode {
     weekday?: number;
     day_of_the_week: string;
     start_time?: string;
+    /** days to add to start_date/end_date to get the local air date (-1, 0 or 1) */
+    dateShift?: number;
   };
   start_season?: MalSeason;
   genres?: Genre[];
@@ -189,6 +198,7 @@ export interface AnimeExtension {
   anisearchId?: number;
   annId?: number;
   anidbId?: number;
+  bangumiId?: number;
   apSlug?: string;
   fandomSlug?: string;
   displayName?: string;
@@ -264,6 +274,7 @@ export function parseExtension(comments: string): AnimeExtension {
     const extension = JSON.parse(Base64.decode(comments)) as unknown as Partial<AnimeExtension>;
     return migrateSimulcasts(extension);
   } catch (e) {
+    console.error(e);
     return {
       simulcast: {},
     } as AnimeExtension;
@@ -286,4 +297,45 @@ export function daysToLocal(simulcast?: SimulcastData): number[] {
           .toLocal().weekday,
     ) || []
   );
+}
+
+export function getSimulcastDays(anime: ListAnime) {
+  const simulcast = anime.my_extension?.simulcast || {};
+  if (!simulcast.day) {
+    const broadcast = anime.node.broadcast;
+    if (broadcast?.weekday) {
+      simulcast.day = [broadcast.weekday];
+    }
+  }
+}
+
+export class ListAnimeModel implements ListAnime {
+  node: AnimeNode;
+  list_status: MyAnimeStatus;
+  my_extension?: AnimeExtension;
+  busy?: boolean;
+  constructor(anime: ListAnime) {
+    this.node = anime.node;
+    this.list_status = anime.list_status;
+    this.my_extension = anime.my_extension;
+    this.busy = anime.busy;
+  }
+
+  get simulcastDays() {
+    const simulcast = this.my_extension?.simulcast || {};
+    if (!simulcast.day) {
+      const broadcast = this.node.broadcast;
+      if (broadcast?.weekday) {
+        simulcast.day = [broadcast.weekday];
+      }
+    }
+    if (!simulcast.time) {
+      const broadcast = this.node.broadcast;
+      if (broadcast?.start_time) {
+        simulcast.time = broadcast.start_time;
+      }
+    }
+
+    return daysToLocal(this.my_extension?.simulcast);
+  }
 }

@@ -1,21 +1,28 @@
 import { Injectable } from '@angular/core';
-import { statusFromMal } from '@models/anilist';
+import { ToasterService } from '@components/toaster/toaster.service';
+import {
+  AnilistWorkCharacter,
+  AnilistWorkStaff,
+  formatRelationType,
+  statusFromMal,
+} from '@models/anilist';
 import {
   Anime,
   AnimeNode,
   ListAnime,
   MyAnimeStatus,
-  MyAnimeUpdate,
+  MyAnimeUpdateExtended,
   parseExtension,
   WatchStatus,
 } from '@models/anime';
 import { Weekday } from '@models/components';
-import { Jikan4AnimeCharacter, Jikan4Staff, Jikan4WorkRelation } from '@models/jikan';
 import { RelatedManga } from '@models/manga';
 import { AnilistService } from '@services/anilist.service';
 import { AnnictService } from '@services/anime/annict.service';
+import { BangumiService } from '@services/anime/bangumi.service';
 import { SimklService } from '@services/anime/simkl.service';
 import { TraktService } from '@services/anime/trakt.service';
+import { AnisearchService } from '@services/anisearch.service';
 import { CacheService } from '@services/cache.service';
 import { DialogueService } from '@services/dialogue.service';
 import { GlobalService } from '@services/global.service';
@@ -25,7 +32,6 @@ import { SettingsService } from '@services/settings.service';
 import { ShikimoriService } from '@services/shikimori.service';
 import { Base64 } from 'js-base64';
 import { DateTime, WeekdayNumbers } from 'luxon';
-import { environment } from 'src/environments/environment';
 
 import { LivechartService } from './livechart.service';
 
@@ -33,21 +39,50 @@ import { LivechartService } from './livechart.service';
   providedIn: 'root',
 })
 export class AnimeService {
-  private backendUrl = `${environment.backend}`;
   nsfw = true;
+
+  private readonly updateServiceNames = [
+    null,
+    'AniList',
+    'Kitsu',
+    'aniSearch',
+    'Shikimori',
+    'SIMKL',
+    'Annict',
+    'Trakt',
+    'Livechart',
+    'Bangumi',
+  ] as const;
+
+  private readonly deleteServiceNames = [
+    null,
+    'AniList',
+    'Kitsu',
+    'aniSearch',
+    'Shikimori',
+    'SIMKL',
+    'Annict',
+    'Trakt',
+    'Livechart',
+    'Bangumi',
+  ] as const;
+
   constructor(
     private malService: MalService,
     private anilist: AnilistService,
     private kitsu: KitsuService,
+    private anisearch: AnisearchService,
     private shikimori: ShikimoriService,
     private simkl: SimklService,
     private annict: AnnictService,
     private trakt: TraktService,
     private livechart: LivechartService,
+    private bangumi: BangumiService,
     private cache: CacheService,
     private settings: SettingsService,
     private dialogue: DialogueService,
     private glob: GlobalService,
+    private toaster: ToasterService,
   ) {
     this.settings.nsfw$.asObservable().subscribe(nsfw => {
       this.nsfw = nsfw;
@@ -135,9 +170,8 @@ export class AnimeService {
 
   async addAnime(
     anime: Partial<Anime>,
-    data: Partial<MyAnimeUpdate> = {},
+    data: MyAnimeUpdateExtended = { status: 'plan_to_watch', is_rewatching: false },
   ): Promise<MyAnimeStatus | undefined> {
-    data.status = 'plan_to_watch';
     if (!anime.id) return;
     if (
       anime.media_type !== 'movie' &&
@@ -159,37 +193,41 @@ export class AnimeService {
         data.extension = Base64.encode(JSON.stringify({ episodeRule }));
       }
     }
-    return await this.updateAnime(
-      {
-        malId: anime.id,
-        anilistId: anime.my_extension?.anilistId,
-        kitsuId: anime.my_extension?.kitsuId,
-        simklId: anime.my_extension?.simklId,
-        annictId: anime.my_extension?.annictId,
-        livechartId: anime.my_extension?.livechartId,
-      },
-      data,
-    );
+    return await this.updateAnime(anime as Anime, data);
   }
 
-  async updateAnime(
-    ids: {
-      malId: number;
-      anilistId?: number;
-      kitsuId?: { kitsuId: number | string; entryId?: string | undefined };
-      simklId?: number;
-      annictId?: number;
-      trakt?: { id?: string; season?: number };
-      livechartId?: number;
-    },
-    data: Partial<MyAnimeUpdate>,
-  ): Promise<MyAnimeStatus> {
-    const [malResponse] = await Promise.all([
+  /**
+   * Collect all external provider ids for an anime from its extension, so callers
+   * only need to hand over the whole entry instead of assembling the id list.
+   */
+  private extractAnimeIds(anime: Anime | ListAnime) {
+    const node: Anime | AnimeNode = 'node' in anime ? anime.node : anime;
+    const ext = anime.my_extension;
+    return {
+      malId: node.id,
+      anilistId: ext?.anilistId,
+      kitsuId: ext?.kitsuId,
+      anisearchId: ext?.anisearchId,
+      simklId: ext?.simklId,
+      annictId: ext?.annictId,
+      trakt: {
+        id: ext?.trakt,
+        season: node.media_type === 'movie' ? -1 : ext?.seasonNumber,
+      },
+      livechartId: ext?.livechartId,
+      bangumiId: ext?.bangumiId,
+    };
+  }
+
+  async updateAnime(anime: Anime | ListAnime, data: MyAnimeUpdateExtended): Promise<MyAnimeStatus> {
+    const ids = this.extractAnimeIds(anime);
+    const results = await Promise.allSettled([
       this.malService.put<MyAnimeStatus>('anime/' + ids.malId, data),
       (async () => {
         if (this.anilist.loggedIn) {
           if (!ids.anilistId) {
-            ids.anilistId = await this.anilist.getId(ids.malId, 'ANIME');
+            // lookup failure just means "no id" – only actual updates may warn
+            ids.anilistId = await this.anilist.getId(ids.malId, 'ANIME').catch(() => undefined);
           }
           if (!ids.anilistId) return;
           const startDate = data.start_date ? DateTime.fromISO(data.start_date) : undefined;
@@ -220,7 +258,7 @@ export class AnimeService {
       })(),
       (async () => {
         if (!ids.kitsuId) {
-          ids.kitsuId = await this.kitsu.getId({ id: ids.malId }, 'anime');
+          ids.kitsuId = await this.kitsu.getId({ id: ids.malId }, 'anime').catch(() => undefined);
         }
         if (!ids.kitsuId) return;
         return this.kitsu.updateEntry(ids.kitsuId, 'anime', {
@@ -233,6 +271,13 @@ export class AnimeService {
           reconsuming: data.is_rewatching,
           reconsumeCount: data.num_times_rewatched,
         });
+      })(),
+      (async () => {
+        if (!ids.anisearchId) {
+          ids.anisearchId = await this.anisearch.getId(ids.malId, 'anime').catch(() => undefined);
+        }
+        if (!ids.anisearchId) return;
+        return this.anisearch.updateEntry(ids.anisearchId, data, 'anime');
       })(),
       this.shikimori.updateMedia({
         target_id: ids.malId,
@@ -247,69 +292,77 @@ export class AnimeService {
       this.annict.updateEntry(ids.annictId, data),
       this.trakt.updateEntry(ids.trakt, data),
       this.livechart.updateAnime(ids.livechartId, data),
+      this.bangumi.updateEntry(ids.bangumiId, data, 'anime'),
     ]);
-    return malResponse;
+    const malResult = results[0];
+    if (malResult.status === 'rejected') throw malResult.reason;
+    for (let i = 1; i < results.length; i++) {
+      if (results[i].status === 'rejected') {
+        this.toaster.addError(
+          `${this.updateServiceNames[i]} update failed. Please try again later.`,
+          0,
+        );
+      }
+    }
+    return malResult.value;
   }
 
-  async deleteAnime(ids: {
-    malId: number;
-    anilistId?: number;
-    kitsuId?: { kitsuId: number | string; entryId?: string | undefined };
-    simklId?: number;
-    annictId?: number;
-    traktId?: string;
-    livechartId?: number;
-  }) {
-    await Promise.all([
+  async deleteAnime(anime: Anime | ListAnime) {
+    const ids = this.extractAnimeIds(anime);
+    const results = await Promise.allSettled([
       this.malService.delete<MyAnimeStatus>('anime/' + ids.malId),
       this.anilist.deleteEntry(ids.anilistId),
       this.kitsu.deleteEntry(ids.kitsuId, 'anime'),
+      this.anisearch.deleteEntry(ids.anisearchId),
       this.shikimori.deleteMedia(ids.malId, 'Anime'),
       this.simkl.deleteEntry(ids.simklId),
       this.annict.updateStatus(ids.annictId, 'no_select'),
-      this.trakt.ignore(ids.traktId),
+      this.trakt.drop(ids.trakt?.id),
       this.livechart.deleteAnime(ids.livechartId),
+      this.bangumi.deleteEntry(ids.bangumiId),
     ]);
+    const malResult = results[0];
+    if (malResult.status === 'rejected') throw malResult.reason;
+    for (let i = 1; i < results.length; i++) {
+      if (results[i].status === 'rejected') {
+        this.toaster.addError(
+          `${this.deleteServiceNames[i]} delete failed. Please try again later.`,
+          0,
+        );
+      }
+    }
     return true;
   }
 
   async getWebsite(id: number): Promise<string | undefined> {
-    const links = await this.malService.getJikanData<Array<{ name: string; url: string }>>(
-      `anime/${id}/external`,
-    );
-    const website = links?.find(link => link.name.includes('Official'));
-    return website?.url;
+    const anilistId = await this.anilist.getId(id, 'ANIME');
+    if (!anilistId) return undefined;
+    return this.anilist.getExternalWebsite(anilistId);
   }
 
   async getManga(id: number): Promise<RelatedManga[]> {
-    const relationTypes = await this.malService.getJikanData<Jikan4WorkRelation[]>(
-      `anime/${id}/relations`,
-    );
-    const mangas = [] as RelatedManga[];
-    for (const relationType of relationTypes) {
-      for (const related of relationType.entry) {
-        if (related.type === 'manga') {
-          mangas.push({
-            node: { id: related.mal_id, title: related.name },
-            relation_type: relationType.relation.replace(' ', '_').toLowerCase(),
-            relation_type_formatted: relationType.relation,
-          });
-        }
-      }
-    }
-    return mangas;
+    const anilistId = await this.anilist.getId(id, 'ANIME');
+    if (!anilistId) return [];
+    const relations = await this.anilist.getRelations(anilistId);
+    return relations
+      .filter(relation => relation.node.type === 'MANGA' && relation.node.idMal)
+      .map(relation => ({
+        node: { id: relation.node.idMal as number, title: relation.node.title },
+        relation_type: relation.relationType.toLowerCase(),
+        relation_type_formatted: formatRelationType(relation.relationType),
+      }));
   }
 
-  async getCharacters(id: number): Promise<Jikan4AnimeCharacter[]> {
-    const characters = await this.malService.getJikanData<Jikan4AnimeCharacter[]>(
-      `anime/${id}/characters`,
-    );
-    return characters || [];
+  async getCharacters(id: number): Promise<AnilistWorkCharacter[]> {
+    const anilistId = await this.anilist.getId(id, 'ANIME');
+    if (!anilistId) return [];
+    return this.anilist.getWorkCharacters(anilistId);
   }
 
-  async getStaff(id: number): Promise<Jikan4Staff[]> {
-    const staff = await this.malService.getJikanData<Jikan4Staff[]>(`anime/${id}/staff`);
-    return staff || [];
+  async getStaff(id: number): Promise<AnilistWorkStaff[]> {
+    const anilistId = await this.anilist.getId(id, 'ANIME');
+    if (!anilistId) return [];
+    return this.anilist.getWorkStaff(anilistId);
   }
 
   /**
@@ -390,13 +443,22 @@ export class AnimeService {
         second: 0,
         millisecond: 0,
       });
-      anime.broadcast.weekday = date.setZone('system').weekday % 7;
-      anime.broadcast.day_of_the_week = date.setZone('system').toFormat('cccc');
-      anime.broadcast.start_time = date.setZone('system').toFormat('HH:mm');
+      const localDate = date.setZone('system');
+      let dateShift = weekday !== undefined ? localDate.weekday - weekday : 0;
+      if (dateShift > 1) dateShift -= 7;
+      if (dateShift < -1) dateShift += 7;
+      anime.broadcast.weekday = localDate.weekday % 7;
+      anime.broadcast.day_of_the_week = localDate.toFormat('cccc');
+      anime.broadcast.start_time = localDate.toFormat('HH:mm');
+      anime.broadcast.dateShift = dateShift;
     }
   }
 
-  async getTraktData(malId?: number): Promise<
+  async getTraktData(
+    malId?: number,
+    simklId?: number,
+    season?: number,
+  ): Promise<
     | {
         id: number;
         type: 'show' | 'movie';
@@ -405,14 +467,40 @@ export class AnimeService {
       }
     | undefined
   > {
-    if (!malId) return undefined;
-    return this.cache
-      .fetch<{
-        id: number;
-        type: 'show' | 'movie';
-        title: string;
-        season?: number;
-      }>(`${this.backendUrl}trakt/${malId}`)
-      .catch(() => undefined);
+    if (!malId && !simklId) return undefined;
+    if (!simklId && malId) {
+      simklId = await this.simkl.getId(malId);
+    }
+    if (!simklId) return undefined;
+    const simklData = await this.simkl.getEntry(simklId);
+    const imdbId = simklData?.ids.imdb;
+    if (!imdbId) {
+      if (simklData?.relations?.length && !season) {
+        season = simklData?.season;
+        for (const relation of simklData.relations) {
+          const result = await this.getTraktData(undefined, relation.ids.simkl, season);
+          if (result) return result;
+        }
+      }
+      return undefined;
+    }
+    const traktData = await this.trakt.searchByImdb(imdbId);
+    console.log(traktData);
+    const data = traktData.map(entry => {
+      if (entry.type === 'movie') {
+        return {
+          id: entry.movie.ids.trakt,
+          type: 'movie' as const,
+          title: entry.movie.title,
+        };
+      }
+      return {
+        id: entry.show.ids.trakt,
+        type: 'show' as const,
+        title: entry.show.title,
+        season,
+      };
+    });
+    return data[0];
   }
 }

@@ -1,0 +1,31 @@
+@use 'sass:map';
+@use './config' as *;
+
+@function breakpoint-min($name, $breakpoints: $grid-breakpoints) {
+    $min: map.get($breakpoints, $name);
+    @if $min != 0 {
+        @return $min;
+    }
+    @return null;
+}
+
+@function breakpoint-infix($name, $breakpoints: $grid-breakpoints) {
+    @if breakpoint-min($name, $breakpoints) == null {
+        @return "";
+    }
+    @return "-#{$name}";
+}
+
+@mixin media-breakpoint-up($name, $breakpoints: $grid-breakpoints) {
+    $min: breakpoint-min($name, $breakpoints);
+
+    @if $min {
+        @media (min-width: $min) {
+            @content;
+        }
+    }
+
+    @else {
+        @content;
+    }
+}

@@ -1,19 +1,15 @@
-import { Component, Input, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { Button } from '@components/dialogue/dialogue.component';
 import { StreamPipe } from '@components/stream.pipe';
-import { AnnComponent } from '@external/ann/ann.component';
-import { AnnictComponent } from '@external/annict/annict.component';
-import { KitsuComponent } from '@external/kitsu/kitsu.component';
-import { LivechartComponent } from '@external/livechart/livechart.component';
-import { TraktComponent } from '@external/trakt/trakt.component';
+import { ToasterService } from '@components/toaster/toaster.service';
 import {
   Anime,
   AnimeEpisodeRule,
   AnimeExtension,
   daysToLocal,
   MyAnimeUpdate,
-  parseExtension,
+  MyAnimeUpdateExtended,
   WatchStatus,
 } from '@models/anime';
 import { ExtRating } from '@models/components';
@@ -23,6 +19,7 @@ import { AnimePlanetService } from '@services/anime-planet.service';
 import { AnidbService } from '@services/anime/anidb.service';
 import { AnimeService } from '@services/anime/anime.service';
 import { AnnictService } from '@services/anime/annict.service';
+import { BangumiService } from '@services/anime/bangumi.service';
 import { LegacyStream, LivechartService } from '@services/anime/livechart.service';
 import { SimklService } from '@services/anime/simkl.service';
 import { TraktService } from '@services/anime/trakt.service';
@@ -32,15 +29,19 @@ import { CacheService } from '@services/cache.service';
 import { DialogueService } from '@services/dialogue.service';
 import { GlobalService } from '@services/global.service';
 import { KitsuService } from '@services/kitsu.service';
+import { MalService } from '@services/mal.service';
 import { ShikimoriService } from '@services/shikimori.service';
 import { Base64 } from 'js-base64';
 import { DateTime } from 'luxon';
 import Timezone from 'timezone-enum';
 
+import { AnimeEditComponent } from './edit/anime-edit.component';
+
 @Component({
   selector: 'myanili-anime-details',
   templateUrl: './details.component.html',
   styleUrls: ['./details.component.scss'],
+  changeDetection: ChangeDetectionStrategy.Eager,
   standalone: false,
 })
 export class AnimeDetailsComponent implements OnInit {
@@ -48,11 +49,8 @@ export class AnimeDetailsComponent implements OnInit {
   anime?: Anime;
   title?: string;
   imageCache?: string;
-  edit = false;
   fromCache = false;
   busy = false;
-  editBackup?: Partial<MyAnimeUpdate>;
-  editExtension?: { simulcast: {} } & AnimeExtension;
   traktUser?: string;
   annictUser?: string;
   activeTab = 1;
@@ -60,6 +58,7 @@ export class AnimeDetailsComponent implements OnInit {
   @Input() inModal = false;
   streams: LegacyStream[] = [];
   originalLanguage = 'Japanese';
+  loggedIn: string | false = false;
 
   constructor(
     private animeService: AnimeService,
@@ -78,8 +77,11 @@ export class AnimeDetailsComponent implements OnInit {
     private ann: AnnService,
     private anidb: AnidbService,
     private ap: AnimePlanetService,
+    private bangumi: BangumiService,
     private cache: CacheService,
     private dialogue: DialogueService,
+    private malService: MalService,
+    private toaster: ToasterService,
   ) {
     this.route.paramMap.subscribe(async params => {
       const newId = Number(params.get('id'));
@@ -90,8 +92,6 @@ export class AnimeDetailsComponent implements OnInit {
         delete this.title;
         delete this.anime;
         this.busy = false;
-        this.edit = false;
-        this.glob.busy();
         await this.ngOnInit();
       }
     });
@@ -100,6 +100,9 @@ export class AnimeDetailsComponent implements OnInit {
     });
     this.annict.user.subscribe(user => {
       this.annictUser = user;
+    });
+    this.malService.loggedIn.subscribe(loggedIn => {
+      if (loggedIn !== '***loading***') this.loggedIn = loggedIn;
     });
   }
 
@@ -113,7 +116,6 @@ export class AnimeDetailsComponent implements OnInit {
           this.anime = animeCached;
           this.glob.setTitle(animeCached.title);
           this.fromCache = true;
-          this.glob.notbusy();
         }
       })
       .catch(() => {});
@@ -153,7 +155,6 @@ export class AnimeDetailsComponent implements OnInit {
     if (!this.streams.length) {
       this.initStreams();
     }
-    this.glob.notbusy();
     await this.getRatings();
   }
 
@@ -221,6 +222,15 @@ export class AnimeDetailsComponent implements OnInit {
         }),
       );
     }
+    if (!this.anime.my_extension.bangumiId) {
+      promises.push(
+        this.bangumi.getId(anime.alternative_titles?.ja || anime.title, 'anime').then(bangumiId => {
+          if (bangumiId && this?.anime?.my_extension) {
+            this.anime.my_extension.bangumiId = bangumiId;
+          }
+        }),
+      );
+    }
     if (!this.anime.my_extension.livechartId) {
       const livechartPromise = new Promise(async resolve => {
         const livechartId = await this.livechart.getId(this.id, anime.title);
@@ -243,7 +253,7 @@ export class AnimeDetailsComponent implements OnInit {
     }
     if (!this.anime.my_extension.trakt) {
       promises.push(
-        this.animeService.getTraktData(this.id).then(traktData => {
+        this.animeService.getTraktData(this.id, this.anime.my_extension.simklId).then(traktData => {
           if (!traktData || !this?.anime?.my_extension) return;
           this.anime.my_extension.trakt ||= String(traktData.id);
           this.anime.my_extension.seasonNumber ||= traktData.season;
@@ -267,39 +277,31 @@ export class AnimeDetailsComponent implements OnInit {
       }
     }
     if (promises.length && anime.my_extension && anime.my_list_status?.status) {
+      // tslint:disable-next-line deprecation
       if ('series' in anime.my_extension) delete anime.my_extension.series;
-      await this.animeService.updateAnime(
-        {
-          malId: anime.id,
-          kitsuId: this.anime.my_extension.kitsuId,
-          anilistId: this.anime.my_extension.anilistId,
-          simklId: this.anime.my_extension.simklId,
-          annictId: this.anime.my_extension.annictId,
-        },
-        {
-          status: anime.my_list_status.status,
-          is_rewatching: anime.my_list_status.is_rewatching,
-          extension: Base64.encode(
-            JSON.stringify({
-              ...anime.my_extension,
-              kitsuId: this.anime.my_extension.kitsuId,
-              anilistId: this.anime.my_extension.anilistId,
-              simklId: this.anime.my_extension.simklId,
-              annictId: this.anime.my_extension.annictId,
-              anisearchId: this.anime.my_extension.anisearchId,
-              livechartId: this.anime.my_extension.livechartId,
-              trakt: this.anime.my_extension.trakt,
-              seasonNumber: this.anime.my_extension.seasonNumber,
-            }),
-          ),
-        },
-      );
+      await this.animeService.updateAnime(this.anime, {
+        status: anime.my_list_status.status,
+        is_rewatching: anime.my_list_status.is_rewatching,
+        extension: Base64.encode(
+          JSON.stringify({
+            ...anime.my_extension,
+            kitsuId: this.anime.my_extension.kitsuId,
+            anilistId: this.anime.my_extension.anilistId,
+            simklId: this.anime.my_extension.simklId,
+            annictId: this.anime.my_extension.annictId,
+            anisearchId: this.anime.my_extension.anisearchId,
+            livechartId: this.anime.my_extension.livechartId,
+            bangumiId: this.anime.my_extension.bangumiId,
+            trakt: this.anime.my_extension.trakt,
+            seasonNumber: this.anime.my_extension.seasonNumber,
+          }),
+        ),
+      });
     }
   }
 
   async initStreams() {
     if (!this.anime?.my_extension?.livechartId) return;
-    console.log(this.anime.my_extension.livechartId);
     this.streams = await this.livechart.getStreams(this.anime.my_extension.livechartId);
   }
 
@@ -310,119 +312,29 @@ export class AnimeDetailsComponent implements OnInit {
   async editSave() {
     if (this.busy) return;
     if (this.anime?.my_list_status) {
-      if (this.edit) return this.save();
-      this.startEdit();
+      this.openEditModal();
     } else {
       this.addAnime();
     }
   }
 
-  async startEdit() {
-    if (!this.anime?.my_list_status) return;
-    this.edit = true;
-    this.editBackup = {
-      status: this.anime.my_list_status.status || 'plan_to_watch',
-      is_rewatching: this.anime.my_list_status.is_rewatching,
-      score: this.anime.my_list_status.score,
-      num_watched_episodes: this.anime.my_list_status.num_episodes_watched,
-      priority: this.anime.my_list_status.priority,
-      rewatch_value: this.anime.my_list_status.rewatch_value,
-      start_date: this.anime.my_list_status.start_date,
-      finish_date: this.anime.my_list_status.finish_date,
-      tags: this.anime.my_list_status.tags?.join(','),
-    };
-    try {
-      const extension = parseExtension(this.anime.my_list_status.comments);
-      this.editExtension = {
-        series: '',
-        seasonNumber: 1,
-        episodeCorOffset: 0,
-        ...this.anime.my_extension,
-        ...extension,
-      };
-    } catch (e) {
-      this.editExtension = {
-        series: '',
-        seasonNumber: 1,
-        episodeCorOffset: 0,
-        externalStreaming: '',
-        externalStreamingId: '',
-        simulcast: {},
-        ...this.anime.my_extension,
-      };
-    }
-  }
+  async openEditModal() {
+    if (!this.anime) return;
 
-  async save() {
-    if (!this.anime?.my_list_status) return;
-    if (!this.editBackup) {
-      this.edit = false;
-      return;
-    }
-    this.busy = true;
-    const updateData = {
-      comments: this.editExtension?.comment || '',
-      extension: Base64.encode(JSON.stringify(this.editExtension)),
-    } as Partial<MyAnimeUpdate>;
-    if (this.editBackup.status !== this.anime.my_list_status.status) {
-      updateData.status = this.editBackup?.status;
-    }
-    if (this.editBackup.is_rewatching !== this.anime.my_list_status.is_rewatching) {
-      updateData.is_rewatching = this.editBackup?.is_rewatching;
-    }
-    if (this.editBackup.score !== this.anime.my_list_status.score) {
-      updateData.score = this.editBackup?.score;
-    }
-    if (this.editBackup.num_watched_episodes !== this.anime.my_list_status.num_episodes_watched) {
-      updateData.num_watched_episodes = this.editBackup?.num_watched_episodes;
-    }
-    if (this.editBackup.priority !== this.anime.my_list_status.priority) {
-      updateData.priority = this.editBackup?.priority;
-    }
-    if (this.editBackup.rewatch_value !== this.anime.my_list_status.rewatch_value) {
-      updateData.rewatch_value = this.editBackup?.rewatch_value;
-    }
-    if (this.editBackup.tags !== this.anime.my_list_status.tags?.join(',')) {
-      updateData.tags = this.editBackup?.tags;
-    }
-    if (this.editBackup.start_date !== this.anime.my_list_status.start_date) {
-      updateData.start_date = this.editBackup?.start_date;
-    }
-    if (this.editBackup.finish_date !== this.anime.my_list_status.finish_date) {
-      updateData.finish_date = this.editBackup?.finish_date;
-    }
-    await this.animeService.updateAnime(
-      {
-        malId: this.anime.id,
-        anilistId: this.anime.my_extension?.anilistId,
-        kitsuId: this.anime.my_extension?.kitsuId,
-        simklId: this.anime.my_extension?.simklId,
-        annictId: this.anime.my_extension?.annictId,
-        trakt: {
-          id: this.anime.my_extension?.trakt,
-          season: this.anime.media_type === 'movie' ? -1 : this.anime.my_extension?.seasonNumber,
-        },
-        livechartId: this.anime.my_extension?.livechartId,
-      },
-      updateData,
-    );
-    this.stopEdit();
-    await this.ngOnInit();
-    this.busy = false;
-  }
+    const modal = this.modalService.open(AnimeEditComponent, { size: 'xl' });
+    modal.componentInstance.anime = this.anime;
+    modal.componentInstance.traktUser = this.traktUser;
+    modal.componentInstance.annictUser = this.annictUser;
 
-  stopEdit() {
-    this.edit = false;
-    delete this.editBackup;
-    delete this.editExtension;
-  }
-
-  enableKitsu() {
-    if (!this.editExtension) return false;
-    if (!this.editExtension.kitsuId) {
-      this.editExtension.kitsuId = { kitsuId: '' };
-    }
-    return true;
+    modal.closed.subscribe(async result => {
+      if (result === 'deleted') {
+        // Entry was deleted, reload component to handle missing data
+        await this.ngOnInit();
+      } else if (result) {
+        // Reload component data after successful save
+        await this.ngOnInit();
+      }
+    });
   }
 
   async addAnime() {
@@ -437,56 +349,60 @@ export class AnimeDetailsComponent implements OnInit {
     if (!this.anime) return;
     this.glob.busy();
     this.busy = true;
-    const data = { status } as Partial<MyAnimeUpdate>;
-    if (status === 'watching' && !this.anime.my_list_status?.start_date) {
-      data.start_date = DateTime.local().toISODate() || undefined;
+    try {
+      const data = {
+        status,
+        is_rewatching: this.anime.my_list_status?.is_rewatching,
+      } as MyAnimeUpdateExtended;
+      if (status === 'watching' && !this.anime.my_list_status?.start_date) {
+        data.start_date = DateTime.local().toISODate() || undefined;
+      }
+      await this.animeService.updateAnime(this.anime, data);
+      await this.ngOnInit();
+    } finally {
+      this.glob.notbusy();
+      this.busy = false;
     }
-    await this.animeService.updateAnime(
-      {
-        malId: this.anime.id,
-        anilistId: this.anime.my_extension?.anilistId,
-        kitsuId: this.anime.my_extension?.kitsuId,
-        simklId: this.anime.my_extension?.simklId,
-        annictId: this.anime.my_extension?.annictId,
-        livechartId: this.anime.my_extension?.livechartId,
-      },
-      data,
-    );
-    await this.ngOnInit();
-    this.busy = false;
   }
 
   async rewatch() {
     if (!this.anime) return;
     this.glob.busy();
     this.busy = true;
-    await this.animeService.updateAnime(
-      {
-        malId: this.anime.id,
-        anilistId: this.anime.my_extension?.anilistId,
-        kitsuId: this.anime.my_extension?.kitsuId,
-        simklId: this.anime.my_extension?.simklId,
-        annictId: this.anime.my_extension?.annictId,
-        livechartId: this.anime.my_extension?.livechartId,
-      },
-      {
+    try {
+      await this.animeService.updateAnime(this.anime, {
         status: 'completed',
         is_rewatching: true,
         num_watched_episodes: 0,
-      },
-    );
-    await this.ngOnInit();
-    this.busy = false;
+      });
+      await this.ngOnInit();
+    } finally {
+      this.glob.notbusy();
+      this.busy = false;
+    }
   }
 
   async plusOne() {
     if (!this.anime || !this.anime.my_list_status) return;
     this.glob.busy();
+    try {
+      await this.doPlusOne();
+    } finally {
+      this.glob.notbusy();
+    }
+  }
+
+  private async doPlusOne() {
+    if (!this.anime || !this.anime.my_list_status) return;
     const currentEpisode = this.anime.my_list_status?.num_episodes_watched || 0;
     const data = {
       num_watched_episodes: currentEpisode + 1,
-    } as Partial<MyAnimeUpdate>;
-    if (this.anime.my_extension) this.anime.my_extension.lastWatchedAt = new Date();
+      status: this.anime.my_list_status.status,
+      is_rewatching: this.anime.my_list_status.is_rewatching,
+    } as MyAnimeUpdateExtended;
+    if (this.anime.my_extension) {
+      this.anime.my_extension.lastWatchedAt = new Date();
+    }
     let completed = false;
     if (currentEpisode + 1 === this.anime.num_episodes) {
       data.status = 'completed';
@@ -520,28 +436,23 @@ export class AnimeDetailsComponent implements OnInit {
       }
     }
     data.extension = Base64.encode(JSON.stringify(this.anime.my_extension));
-    const [animeStatus] = await Promise.all([
-      this.animeService.updateAnime(
-        {
-          malId: this.anime.id,
-          anilistId: this.anime.my_extension?.anilistId,
-          kitsuId: this.anime.my_extension?.kitsuId,
-          simklId: this.anime.my_extension?.simklId,
-          annictId: this.anime.my_extension?.annictId,
-          livechartId: this.anime.my_extension?.livechartId,
-          trakt: {
-            id: this.anime.my_extension?.trakt,
-            season: this.anime.media_type === 'movie' ? -1 : this.anime.my_extension?.seasonNumber,
-          },
-        },
-        data,
-      ),
+    const plusOneResults = await Promise.allSettled([
+      this.animeService.updateAnime(this.anime, data),
       this.scrobbleTrakt(data),
       this.simkl.scrobble(
         { simkl: this.anime.my_extension?.simklId, mal: this.anime.id },
         currentEpisode + 1,
       ),
     ]);
+    const malPlusOneResult = plusOneResults[0];
+    if (malPlusOneResult.status === 'rejected') throw malPlusOneResult.reason;
+    if (plusOneResults[1].status === 'rejected') {
+      this.toaster.addError('Trakt scrobble failed. Please try again later.', 0);
+    }
+    if (plusOneResults[2].status === 'rejected') {
+      this.toaster.addError('SIMKL scrobble failed. Please try again later.', 0);
+    }
+    const animeStatus = malPlusOneResult.value;
     if (completed) {
       animeStatus.is_rewatching = false;
       const sequels = this.anime.related_anime.filter(
@@ -555,10 +466,11 @@ export class AnimeDetailsComponent implements OnInit {
             'Rewatch sequel',
           );
           if (startSequel) {
-            await this.animeService.updateAnime(
-              { malId: sequel.id },
-              { status: 'completed', is_rewatching: true, num_watched_episodes: 0 },
-            );
+            await this.animeService.updateAnime(sequel, {
+              status: 'completed',
+              is_rewatching: true,
+              num_watched_episodes: 0,
+            });
           }
         } else {
           const futureShow =
@@ -576,11 +488,14 @@ export class AnimeDetailsComponent implements OnInit {
             false,
           );
           if (status) {
-            const sequelData = { status } as Partial<MyAnimeUpdate>;
+            const sequelData = {
+              status,
+              is_rewatching: this.anime.my_list_status?.is_rewatching,
+            } as MyAnimeUpdateExtended;
             if (status === 'watching') {
               sequelData.start_date = DateTime.local().toISODate() || undefined;
             }
-            await this.animeService.updateAnime({ malId: sequel.id }, sequelData);
+            await this.animeService.updateAnime(sequel, sequelData);
           }
         }
         this.ngOnInit();
@@ -593,7 +508,6 @@ export class AnimeDetailsComponent implements OnInit {
     this.anime.my_list_status.num_times_rewatched = animeStatus.num_times_rewatched;
     this.anime.my_list_status.start_date = animeStatus.start_date;
     this.anime.my_list_status.finish_date = animeStatus.finish_date;
-    this.glob.notbusy();
   }
 
   async skip() {
@@ -601,31 +515,22 @@ export class AnimeDetailsComponent implements OnInit {
     const reallySkip = await this.dialogue.confirm(`Skip ${this.anime.title} this week?`, 'Skip');
     if (!reallySkip) return;
     this.glob.busy();
-    if (!this.anime.my_extension) {
-      this.anime.my_extension = {
-        simulcast: {},
-      };
+    try {
+      if (!this.anime.my_extension) {
+        this.anime.my_extension = {
+          simulcast: {},
+        };
+      }
+      this.anime.my_extension.lastWatchedAt = new Date();
+      const data = {
+        extension: Base64.encode(JSON.stringify(this.anime.my_extension)),
+        status: this.anime.my_list_status.status,
+        is_rewatching: this.anime.my_list_status.is_rewatching,
+      } as MyAnimeUpdateExtended;
+      await this.animeService.updateAnime(this.anime, data);
+    } finally {
+      this.glob.notbusy();
     }
-    this.anime.my_extension.lastWatchedAt = new Date();
-    const data = {
-      extension: Base64.encode(JSON.stringify(this.anime.my_extension)),
-    };
-    await this.animeService.updateAnime(
-      {
-        malId: this.anime.id,
-        anilistId: this.anime.my_extension?.anilistId,
-        kitsuId: this.anime.my_extension?.kitsuId,
-        simklId: this.anime.my_extension?.simklId,
-        annictId: this.anime.my_extension?.annictId,
-        livechartId: this.anime.my_extension?.livechartId,
-        trakt: {
-          id: this.anime.my_extension?.trakt,
-          season: this.anime.media_type === 'movie' ? -1 : this.anime.my_extension?.seasonNumber,
-        },
-      },
-      data,
-    );
-    this.glob.notbusy();
   }
 
   async scrobbleTrakt(data: Partial<MyAnimeUpdate> = {}): Promise<boolean> {
@@ -661,85 +566,14 @@ export class AnimeDetailsComponent implements OnInit {
     }
     this.glob.busy();
     this.busy = true;
-    await this.animeService.deleteAnime({
-      malId: this.anime.id,
-      anilistId: this.anime.my_extension?.anilistId,
-      kitsuId: this.anime.my_extension?.kitsuId,
-      simklId: this.anime.my_extension?.simklId,
-      annictId: this.anime.my_extension?.annictId,
-      traktId: this.anime.my_extension?.trakt,
-      livechartId: this.anime.my_extension?.livechartId,
-    });
-    this.edit = false;
-    this.ngOnInit();
-    this.glob.notbusy();
-    this.busy = false;
+    try {
+      await this.animeService.deleteAnime(this.anime);
+      this.ngOnInit();
+    } finally {
+      this.glob.notbusy();
+      this.busy = false;
+    }
     return true;
-  }
-
-  changeWatchlist() {
-    const hideWatchlist = !this.editExtension?.hideWatchlist;
-    if (!this.editExtension) this.editExtension = { hideWatchlist, simulcast: {} };
-    this.editExtension.hideWatchlist = hideWatchlist;
-  }
-
-  async findTrakt() {
-    if (!this.anime || !this.editExtension) return;
-    const modal = this.modalService.open(TraktComponent);
-    modal.componentInstance.isMovie = this.anime.media_type === 'movie';
-    modal.componentInstance.title = this.anime.title;
-    modal.closed.subscribe(value => {
-      if (this.editExtension) this.editExtension.trakt = String(value);
-    });
-  }
-
-  async findKitsu() {
-    if (!this.anime || !this.editExtension) return;
-    const modal = this.modalService.open(KitsuComponent);
-    modal.componentInstance.title = this.anime.title;
-    modal.closed.subscribe(value => {
-      if (this.editExtension) this.editExtension.kitsuId = { kitsuId: Number(value) };
-    });
-  }
-
-  /** @deprecated doesn't work anymore */
-  async findAnisearch() {
-    return;
-    // if (!this.anime || !this.editExtension) return;
-    // const modal = this.modalService.open(AnisearchComponent);
-    // modal.componentInstance.title = this.anime.title;
-    // modal.closed.subscribe(value => {
-    //   if (this.editExtension) this.editExtension.anisearchId = Number(value);
-    // });
-  }
-
-  async findAnnict() {
-    if (!this.anime || !this.editExtension) return;
-    const modal = this.modalService.open(AnnictComponent);
-    modal.componentInstance.title = this.anime.alternative_titles?.ja || this.anime.title;
-    modal.closed.subscribe(value => {
-      if (this.editExtension) this.editExtension.annictId = Number(value);
-    });
-  }
-
-  async findLivechart() {
-    if (!this.anime || !this.editExtension) return;
-    const modal = this.modalService.open(LivechartComponent);
-    modal.componentInstance.title = this.anime.title;
-    modal.closed.subscribe(value => {
-      if (this.editExtension) this.editExtension.livechartId = Number(value);
-    });
-  }
-
-  async findANN() {
-    if (!this.anime || !this.editExtension) return;
-    const modal = this.modalService.open(AnnComponent);
-    modal.componentInstance.title =
-      this.anime.alternative_titles?.en?.replace(/^The /, '') || this.anime.title;
-    modal.componentInstance.type = 'anime';
-    modal.closed.subscribe(value => {
-      if (this.editExtension) this.editExtension.annId = Number(value);
-    });
   }
 
   getDay(simulcast: AnimeExtension['simulcast']): string {
@@ -804,10 +638,17 @@ export class AnimeDetailsComponent implements OnInit {
         this.setRating('anidb', rating);
       });
     }
+    if (!this.getRating('bangumi')) {
+      this.bangumi.getRating(this.anime?.my_extension?.bangumiId).then(rating => {
+        this.setRating('bangumi', rating);
+      });
+    }
   }
 
   get meanRating(): number {
-    if (this.anime?.my_list_status?.score) return this.anime?.my_list_status?.score * 10;
+    if (this.anime?.my_list_status?.score) {
+      return this.anime?.my_list_status?.score * 10;
+    }
     let count = 0;
     const weighted = this.ratings.map(rating => {
       count += rating.rating.ratings || 0;
@@ -819,6 +660,15 @@ export class AnimeDetailsComponent implements OnInit {
 
   getRating(provider: string): { provider: string; rating: ExtRating } | undefined {
     return this.ratings.filter(rat => rat.provider === provider).pop();
+  }
+
+  get websiteHost(): string {
+    if (!this.anime?.website) return '';
+    try {
+      return new URL(this.anime.website).hostname.replace(/^www\./, '');
+    } catch (e) {
+      return this.anime.website;
+    }
   }
 
   setRating(provider: string, rating?: ExtRating) {

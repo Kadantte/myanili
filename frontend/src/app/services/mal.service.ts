@@ -1,12 +1,9 @@
 import { Injectable } from '@angular/core';
 import { ListAnime, WatchStatus } from '@models/anime';
-import { Jikan4Response } from '@models/jikan';
 import { ListManga, ReadStatus } from '@models/manga';
 import { MalUser, UserResponse } from '@models/user';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, Subject } from 'rxjs';
 import { environment } from 'src/environments/environment';
-
-import { CacheService } from './cache.service';
 
 @Injectable({
   providedIn: 'root',
@@ -15,8 +12,9 @@ export class MalService {
   private backendUrl = `${environment.backend}mal/`;
   private isLoggedIn = new BehaviorSubject<string | false>('***loading***');
   private malUser = new BehaviorSubject<MalUser | undefined>(undefined);
+  private hasChanged = new Subject<void>();
 
-  constructor(private cache: CacheService) {
+  constructor() {
     const malUser = JSON.parse(localStorage.getItem('malUser') || 'false') as MalUser | false;
     if (malUser) {
       this.isLoggedIn.next(malUser.name);
@@ -53,6 +51,7 @@ export class MalService {
     if (!request.ok) {
       throw new Error(`Error ${request.status}: ${request.statusText}`);
     }
+    this.hasChanged.next();
     return request.json() as Promise<T>;
   }
 
@@ -64,21 +63,6 @@ export class MalService {
   // tslint:disable-next-line:no-any
   async delete<T>(path: string): Promise<T> {
     return this.post<T>(path, {}, 'DELETE');
-  }
-
-  async getJikanData<T>(url: string): Promise<T> {
-    try {
-      const response = await this.cache.fetch<Jikan4Response<T>>(`${environment.jikanUrl}${url}`);
-      return response.data;
-    } catch (e) {
-      try {
-        const response = await fetch(`${environment.jikanFallbackUrl}${url}`);
-        const result = (await response.json()) as unknown as Jikan4Response<T>;
-        return result.data;
-      } catch (ex) {
-        return undefined as unknown as T;
-      }
-    }
   }
 
   async checkLogin() {
@@ -117,13 +101,14 @@ export class MalService {
 
   async login() {
     return new Promise(r => {
-      const loginWindow = window.open(this.backendUrl + 'auth');
       window.addEventListener('message', async event => {
-        if (event.data) {
+        console.log(event);
+        if (event.data?.mal) {
           await this.checkLogin();
         }
         loginWindow?.close();
       });
+      const loginWindow = window.open(`${this.backendUrl}auth`);
     });
   }
 
@@ -133,6 +118,11 @@ export class MalService {
 
   get user() {
     return this.malUser.asObservable();
+  }
+
+  /** Emits after every write to MyAnimeList, so cached list views can be dropped. */
+  get changed() {
+    return this.hasChanged.asObservable();
   }
 
   async maintenace(): Promise<boolean> {

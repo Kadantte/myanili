@@ -1,12 +1,25 @@
-<myanili-header [header]="title"></myanili-header>
+<header class="container-fluid my-4 position-relative text-center">
+  <button
+    type="button"
+    class="btn btn-link text-reset position-absolute start-0 top-50 translate-middle-y"
+    title="Settings for this view"
+    (click)="openSettings()"
+  >
+    <myanili-icon name="gear" size="20"></myanili-icon>
+  </button>
+  <div class="d-flex align-items-center justify-content-center gap-2">
+    <h1 class="mb-0">{{ title }}</h1>
+    <button class="btn btn-primary btn-sm" (click)="openPlanner()" title="Season Planner">
+      <myanili-icon name="clipboard-check" size="18"></myanili-icon>
+    </button>
+  </div>
+</header>
 <section>
-  <myanili-anime-season-list
-    *ngIf="(settings.layout$ | async) === 'list'"
-    [animes]="animes"
-  ></myanili-anime-season-list>
-  <myanili-anime-season-grid
-    *ngIf="(settings.layout$ | async) !== 'list'"
-    [animes]="animes"
-  ></myanili-anime-season-grid>
+  @if ((settings.layout$ | async) === 'list') {
+    <myanili-anime-season-list [animes]="animes"></myanili-anime-season-list>
+  }
+  @if ((settings.layout$ | async) !== 'list') {
+    <myanili-anime-season-grid [animes]="animes"></myanili-anime-season-grid>
+  }
 </section>
 <myanili-widget-season></myanili-widget-season>

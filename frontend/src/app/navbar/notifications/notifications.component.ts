@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { AnilistService } from '@services/anilist.service';
 import { KitsuService } from '@services/kitsu.service';
@@ -18,6 +18,7 @@ import { KitsuService } from '@services/kitsu.service';
       }
     `,
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   standalone: false,
 })
 export class NotificationsComponent implements OnInit, OnDestroy {
@@ -58,6 +59,14 @@ export class NotificationsComponent implements OnInit, OnDestroy {
             window.open(alNotification.url, '_blank');
           },
         } as Notification;
+
+        const activityMatch = alNotification.url.match(/activity\/(\d+)/);
+        if (activityMatch) {
+          const activityId = Number(activityMatch[1]);
+          notification.callback = () => {
+            this._router.navigate(['feed', 'activity', activityId]);
+          };
+        }
         if (alNotification.media?.idMal) {
           const type = alNotification.media.type.toLocaleLowerCase();
           const malId = alNotification.media.idMal;

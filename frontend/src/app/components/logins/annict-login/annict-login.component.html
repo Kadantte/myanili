@@ -1,0 +1,25 @@
+<div class="row">
+  <div class="col-5">Annict</div>
+  <div class="col-7">
+    @if (annictLoggedIn) {
+      <myanili-icon-annict class="me-1"></myanili-icon-annict>
+      <a href="https://annict.com/@{{ annictLoggedIn }}" target="_blank">{{ annictLoggedIn }}</a>
+      <myanili-icon
+        class="cursor-pointer"
+        name="x"
+        size="20"
+        (click)="annictLogoff()"
+      ></myanili-icon>
+    } @else {
+      <myanili-connection-error service="annict"></myanili-connection-error>
+      <button class="btn btn-sm btn-primary" (click)="annictConnect()" [disabled]="annictLoading">
+        @if (annictLoading) {
+          <myanili-icon-loading></myanili-icon-loading>
+        } @else {
+          <myanili-icon-annict></myanili-icon-annict>
+        }
+        Connect
+      </button>
+    }
+  </div>
+</div>

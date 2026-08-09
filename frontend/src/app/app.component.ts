@@ -1,13 +1,15 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { SwUpdate, VersionEvent } from '@angular/service-worker';
 import { DialogueService } from '@services/dialogue.service';
 import { GlobalService } from '@services/global.service';
 import { MalService } from '@services/mal.service';
+import { RouteScrollService } from '@services/route-scroll.service';
 
 @Component({
   selector: 'myanili-root',
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss'],
+  changeDetection: ChangeDetectionStrategy.Eager,
   standalone: false,
 })
 export class AppComponent {
@@ -18,8 +20,32 @@ export class AppComponent {
     private swUpdate: SwUpdate,
     private glob: GlobalService,
     private dialogue: DialogueService,
+    private routeScroll: RouteScrollService,
   ) {
+    this.routeScroll.start();
     this.setupUpdates();
+    this.initializeApp();
+    this.malService.loggedIn.subscribe(loggedIn => {
+      this.loggedIn = loggedIn;
+    });
+    this.glob.isBusy.subscribe(busy => (this.busy = busy));
+    this.glob.loadingPercent.subscribe(perc => (this.loadingPercent = perc));
+    this.glob.hideNavbar.subscribe(hide => (this.hideNavbar = hide));
+  }
+
+  async initializeApp() {
+    // First check if backend is available with retries
+    const backendAvailable = await this.glob.checkBackendAvailability(5, 1000);
+
+    if (!backendAvailable) {
+      this.dialogue.open(
+        'The backend server is currently not available. Please check back in a moment.',
+        'Backend Unavailable',
+      );
+      return;
+    }
+
+    // Only check MAL maintenance if backend is available
     this.malService.maintenace().then(isMaintenance => {
       if (isMaintenance) {
         this.dialogue.open(
@@ -28,12 +54,6 @@ export class AppComponent {
         );
       }
     });
-    this.malService.loggedIn.subscribe(loggedIn => {
-      this.loggedIn = loggedIn;
-    });
-    this.glob.isBusy.subscribe(busy => (this.busy = busy));
-    this.glob.loadingPercent.subscribe(perc => (this.loadingPercent = perc));
-    this.glob.hideNavbar.subscribe(hide => (this.hideNavbar = hide));
   }
   loggedIn?: string | false = 'loading';
   busy = true;

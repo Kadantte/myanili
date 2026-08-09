@@ -3,6 +3,7 @@ import { NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { DirectivesModule } from '@app/directives/directives.module';
+import { authGuard } from '@app/guards/auth.guard';
 import { RelatedModule } from '@app/related/related.module';
 import { ComponentsModule } from '@components/components.module';
 import { IconModule } from '@icon/icon.module';
@@ -13,20 +14,20 @@ import { InViewportModule } from 'ng-in-viewport';
 import { BookshelfComponent, BookshelfWrapperComponent } from './bookshelf/bookshelf.component';
 import { MangaCharactersComponent } from './details/characters/characters.component';
 import { MangaDetailsComponent } from './details/details.component';
+import { MangaEditComponent } from './details/edit/manga-edit.component';
 import { MangaRecommendationsComponent } from './details/recommendations/recommendations.component';
 import { MangaListGridComponent } from './list/grid/grid.component';
 import { MangaListComponent } from './list/list.component';
 import { MangaListListComponent } from './list/list/list.component';
-import { MagazineComponent } from './magazine/magazine.component';
 import { PlatformComponent } from './widget/platform/platform.component';
 
 @NgModule({
   declarations: [
     BookshelfComponent,
     BookshelfWrapperComponent,
-    MagazineComponent,
     MangaCharactersComponent,
     MangaDetailsComponent,
+    MangaEditComponent,
     MangaListComponent,
     MangaListGridComponent,
     MangaListListComponent,
@@ -44,18 +45,31 @@ import { PlatformComponent } from './widget/platform/platform.component';
     NgbModule,
     RelatedModule,
     RouterModule.forChild([
-      { path: 'list', component: MangaListComponent },
-      { path: 'list/:status', component: MangaListComponent },
-      { path: 'bookshelf', component: BookshelfWrapperComponent },
-      { path: 'details/:id', component: MangaDetailsComponent },
-      { path: 'magazine/:id', component: MagazineComponent },
+      {
+        path: 'list',
+        canActivate: [authGuard],
+        component: MangaListComponent,
+        data: { reuse: 'volatile' },
+      },
+      {
+        path: 'list/:status',
+        canActivate: [authGuard],
+        component: MangaListComponent,
+        data: { reuse: 'volatile' },
+      },
+      {
+        path: 'bookshelf',
+        canActivate: [authGuard],
+        component: BookshelfWrapperComponent,
+        data: { reuse: 'volatile' },
+      },
+      { path: 'details/:id', component: MangaDetailsComponent, data: { reuse: 'volatile' } },
       { path: '', redirectTo: 'bookshelf', pathMatch: 'full' },
     ]),
   ],
   exports: [
     BookshelfComponent,
     BookshelfWrapperComponent,
-    MagazineComponent,
     MangaCharactersComponent,
     MangaDetailsComponent,
     MangaListComponent,

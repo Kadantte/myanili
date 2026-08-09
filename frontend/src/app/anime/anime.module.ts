@@ -3,6 +3,7 @@ import { NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { DirectivesModule } from '@app/directives/directives.module';
+import { authGuard } from '@app/guards/auth.guard';
 import { RelatedModule } from '@app/related/related.module';
 import { ComponentsModule } from '@components/components.module';
 import { IconModule } from '@icon/icon.module';
@@ -12,6 +13,7 @@ import { InViewportModule } from 'ng-in-viewport';
 
 import { AnimeCharactersComponent } from './details/characters/characters.component';
 import { AnimeDetailsComponent } from './details/details.component';
+import { AnimeEditComponent } from './details/edit/anime-edit.component';
 import { AnimeRecommendationsComponent } from './details/recommendations/recommendations.component';
 import { AnimeSongsComponent } from './details/songs/songs.component';
 import { StaffComponent } from './details/staff/staff.component';
@@ -24,6 +26,7 @@ import { ProducerComponent } from './producer/producer.component';
 import { ScheduleComponent } from './schedule/schedule.component';
 import { SeasonGridComponent } from './season/grid/grid.component';
 import { SeasonListComponent } from './season/list/list.component';
+import { SeasonPlannerComponent } from './season/planner/planner.component';
 import { SeasonComponent } from './season/season.component';
 import { WatchlistComponent } from './watchlist/watchlist.component';
 import { StreamingComponent } from './widget/streaming/streaming.component';
@@ -32,6 +35,7 @@ import { StreamingComponent } from './widget/streaming/streaming.component';
   declarations: [
     AnimeCharactersComponent,
     AnimeDetailsComponent,
+    AnimeEditComponent,
     AnimeListComponent,
     AnimeListGridComponent,
     AnimeListListComponent,
@@ -43,6 +47,7 @@ import { StreamingComponent } from './widget/streaming/streaming.component';
     SeasonComponent,
     SeasonGridComponent,
     SeasonListComponent,
+    SeasonPlannerComponent,
     StaffComponent,
     StreamingComponent,
     WatchlistComponent,
@@ -60,14 +65,33 @@ import { StreamingComponent } from './widget/streaming/streaming.component';
     NgbModule,
     RelatedModule,
     RouterModule.forChild([
-      { path: 'list', component: AnimeListComponent },
-      { path: 'list', component: AnimeListComponent },
-      { path: 'list/:status', component: AnimeListComponent },
-      { path: 'watchlist', component: WatchlistComponent },
-      { path: 'schedule', component: ScheduleComponent },
-      { path: 'season', component: SeasonComponent },
-      { path: 'details/:id', component: AnimeDetailsComponent },
-      { path: 'producer/:id', component: ProducerComponent },
+      {
+        path: 'list',
+        canActivate: [authGuard],
+        component: AnimeListComponent,
+        data: { reuse: 'volatile' },
+      },
+      {
+        path: 'list/:status',
+        canActivate: [authGuard],
+        component: AnimeListComponent,
+        data: { reuse: 'volatile' },
+      },
+      {
+        path: 'watchlist',
+        canActivate: [authGuard],
+        component: WatchlistComponent,
+        data: { reuse: 'volatile' },
+      },
+      {
+        path: 'schedule',
+        canActivate: [authGuard],
+        component: ScheduleComponent,
+        data: { reuse: 'volatile' },
+      },
+      { path: 'season', component: SeasonComponent, data: { reuse: 'volatile' } },
+      { path: 'details/:id', component: AnimeDetailsComponent, data: { reuse: 'volatile' } },
+      { path: 'producer/:id', component: ProducerComponent, data: { reuse: 'volatile' } },
       { path: '', redirectTo: 'watchlist', pathMatch: 'full' },
     ]),
   ],

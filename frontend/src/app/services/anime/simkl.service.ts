@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { MyAnimeUpdate, WatchStatus } from '@models/anime';
 import { ExtRating } from '@models/components';
-import { DialogueService } from '@services/dialogue.service';
+import { ConnectionStatusService } from '@services/connection-status.service';
+import { readStoredToken } from '@services/global.service';
 import { BehaviorSubject } from 'rxjs';
 import { environment } from 'src/environments/environment';
 
@@ -14,22 +15,30 @@ export class SimklService {
   private accessToken = '';
   private userSubject = new BehaviorSubject<SimklUser | undefined>(undefined);
 
-  constructor(private dialogue: DialogueService) {
-    this.clientId = String(localStorage.getItem('simklClientId'));
-    this.accessToken = String(localStorage.getItem('simklAccessToken'));
-    if (this.accessToken) {
+  constructor(private connection: ConnectionStatusService) {
+    this.clientId = readStoredToken('simklClientId');
+    this.accessToken = readStoredToken('simklAccessToken');
+    if (this.accessToken && this.clientId) {
       this.checkLogin()
         .then(user => {
           this.userSubject.next(user);
+          if (user) {
+            this.connection.clearError('simkl');
+          } else {
+            this.reportConnectionError();
+          }
         })
-        .catch(e => {
-          this.dialogue.alert(
-            'Could not connect to SIMKL, please check your account settings.',
-            'SIMKL Connection Error',
-          );
-          localStorage.removeItem('simklAccessToken');
+        .catch(() => {
+          this.reportConnectionError();
         });
     }
+  }
+
+  private reportConnectionError() {
+    this.connection.reportError(
+      'simkl',
+      'Could not verify your SIMKL session. It may have expired – reconnect to renew it.',
+    );
   }
 
   async login() {
@@ -42,7 +51,9 @@ export class SimklService {
           localStorage.setItem('simklAccessToken', this.accessToken);
           this.clientId = data.ci;
           localStorage.setItem('simklClientId', this.clientId);
-          this.userSubject.next(await this.checkLogin());
+          const user = await this.checkLogin();
+          this.userSubject.next(user);
+          if (user) this.connection.clearError('simkl');
         }
         loginWindow?.close();
         r(undefined);
@@ -95,10 +106,22 @@ export class SimklService {
     return;
   }
 
+  async getEntry(id: number): Promise<SimklEntry | undefined> {
+    if (!this.clientId || !id) return;
+    const result = await fetch(
+      `${this.baseUrl}anime/${id}?extended=full&client_id=${this.clientId}`,
+    );
+    if (result.ok) {
+      const response = (await result.json()) as SimklEntry;
+      return response;
+    }
+    return;
+  }
+
   async scrobble(ids: { simkl?: number; mal?: number }, number?: number) {
     if (!this.clientId || !this.accessToken || (!ids.simkl && !ids.mal) || !number) return;
     const scrobbleData = { shows: [{ ids, seasons: [{ number: 1, episodes: [{ number }] }] }] };
-    return fetch(`${this.baseUrl}sync/history`, {
+    const response = await fetch(`${this.baseUrl}sync/history`, {
       method: 'POST',
       headers: new Headers({
         Authorization: `Bearer ${this.accessToken}`,
@@ -106,6 +129,8 @@ export class SimklService {
       }),
       body: JSON.stringify(scrobbleData),
     });
+    if (!response.ok) throw new Error(`SIMKL: HTTP ${response.status}`);
+    return response;
   }
 
   async updateEntry(ids: { simkl?: number; mal?: number }, data: Partial<MyAnimeUpdate>) {
@@ -126,7 +151,7 @@ export class SimklService {
   async addToList(ids: { simkl?: number; mal?: number }, list?: SimklList) {
     if (!this.clientId || !this.accessToken || (!ids.simkl && !ids.mal) || !list) return;
     const toListData = { shows: [{ to: list, ids }] };
-    return fetch(`${this.baseUrl}sync/add-to-list`, {
+    const response = await fetch(`${this.baseUrl}sync/add-to-list`, {
       method: 'POST',
       headers: new Headers({
         Authorization: `Bearer ${this.accessToken}`,
@@ -134,12 +159,14 @@ export class SimklService {
       }),
       body: JSON.stringify(toListData),
     });
+    if (!response.ok) throw new Error(`SIMKL: HTTP ${response.status}`);
+    return response;
   }
 
   async deleteEntry(id?: number) {
     if (!this.clientId || !this.accessToken || !id) return;
     const deleteData = { shows: [{ ids: { simkl: id } }] };
-    return fetch(`${this.baseUrl}sync/history/remove`, {
+    const response = await fetch(`${this.baseUrl}sync/history/remove`, {
       method: 'POST',
       headers: new Headers({
         Authorization: `Bearer ${this.accessToken}`,
@@ -147,12 +174,14 @@ export class SimklService {
       }),
       body: JSON.stringify(deleteData),
     });
+    if (!response.ok) throw new Error(`SIMKL: HTTP ${response.status}`);
+    return response;
   }
 
   async addRating(ids: { simkl?: number; mal?: number }, rating: number) {
     if (!this.clientId || !this.accessToken || (!ids.simkl && !ids.mal)) return;
     const ratingData = { shows: [{ rating, ids }] };
-    return fetch(`${this.baseUrl}sync/ratings`, {
+    const response = await fetch(`${this.baseUrl}sync/ratings`, {
       method: 'POST',
       headers: new Headers({
         Authorization: `Bearer ${this.accessToken}`,
@@ -160,6 +189,8 @@ export class SimklService {
       }),
       body: JSON.stringify(ratingData),
     });
+    if (!response.ok) throw new Error(`SIMKL: HTTP ${response.status}`);
+    return response;
   }
 
   async getRating(id?: number): Promise<ExtRating | undefined> {
@@ -183,6 +214,7 @@ export class SimklService {
     this.clientId = '';
     this.accessToken = '';
     this.userSubject.next(undefined);
+    this.connection.clearError('simkl');
     localStorage.removeItem('simklAccessToken');
     localStorage.removeItem('simklClientId');
   }
@@ -232,3 +264,13 @@ export interface SimklUser {
 }
 
 export type SimklList = 'plantowatch' | 'completed' | 'watching' | 'hold' | 'notinteresting';
+
+export interface SimklEntry {
+  title: string;
+  ids: { mal: number; imdb?: string };
+  relations?: Array<{
+    ids: { simkl: number };
+    year?: number;
+  }>;
+  season?: number;
+}

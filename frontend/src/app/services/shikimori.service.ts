@@ -2,29 +2,30 @@ import { Injectable } from '@angular/core';
 import { WatchStatus } from '@models/anime';
 import { ReadStatus } from '@models/manga';
 import { ShikimoriRate, ShikimoriRateStatus, ShikimoriUser } from '@models/shikimori';
-import { cacheExchange, Client, createClient, fetchExchange, gql } from '@urql/core';
+import { cacheExchange, Client, fetchExchange, gql } from '@urql/core';
 import { BehaviorSubject } from 'rxjs';
 import { environment } from 'src/environments/environment';
 
-import { DialogueService } from './dialogue.service';
+import { ConnectionStatusService } from './connection-status.service';
 
 @Injectable({
   providedIn: 'root',
 })
 export class ShikimoriService {
-  private readonly baseUrl = 'https://shikimori.one/api';
+  private readonly baseUrl = 'https://shikimori.io/api';
   private accessToken = '';
   private refreshToken = '';
   private userSubject = new BehaviorSubject<ShikimoriUser | undefined>(undefined);
   private loggedIn = false;
   private client!: Client;
 
-  constructor(private dialogue: DialogueService) {
+  constructor(private connection: ConnectionStatusService) {
     this.accessToken = String(localStorage.getItem('shikimoriAccessToken') || '');
     this.refreshToken = String(localStorage.getItem('shikimoriRefreshToken') || '');
 
-    this.client = createClient({
-      url: 'https://shikimori.one/api/graphql',
+    this.client = new Client({
+      url: 'https://shikimori.io/api/graphql',
+      preferGetMethod: false,
       fetchOptions: () => {
         return {
           headers: {
@@ -38,15 +39,23 @@ export class ShikimoriService {
       this.checkLogin()
         .then(user => {
           this.userSubject.next(user);
+          if (user) {
+            this.connection.clearError('shikimori');
+          } else {
+            this.reportConnectionError();
+          }
         })
-        .catch(e => {
-          this.dialogue.alert(
-            'Could not connect to Shikimori, please check your account settings.',
-            'Shikimori Connection Error',
-          );
-          localStorage.removeItem('shikimoriAccessToken');
+        .catch(() => {
+          this.reportConnectionError();
         });
     }
+  }
+
+  private reportConnectionError() {
+    this.connection.reportError(
+      'shikimori',
+      'Could not verify your Shikimori session. It may have expired – reconnect to renew it.',
+    );
   }
 
   async login() {
@@ -60,7 +69,9 @@ export class ShikimoriService {
           localStorage.setItem('shikimoriAccessToken', this.accessToken);
           this.refreshToken = data.rt;
           localStorage.setItem('shikimoriRefreshToken', this.refreshToken);
-          this.userSubject.next(await this.checkLogin());
+          const user = await this.checkLogin();
+          this.userSubject.next(user);
+          if (user) this.connection.clearError('shikimori');
         }
         loginWindow?.close();
         r(true);
@@ -74,6 +85,7 @@ export class ShikimoriService {
     url.searchParams.append('refresh_token', this.refreshToken);
     const response = await fetch(url);
     if (!response.ok) {
+      // keep the session – the user can renew it manually from the connection list
       return false;
     }
     const data = (await response.json()) as { access_token: string; refresh_token: string };
@@ -89,6 +101,7 @@ export class ShikimoriService {
     this.refreshToken = '';
     this.userSubject.next(undefined);
     this.loggedIn = false;
+    this.connection.clearError('shikimori');
     localStorage.removeItem('shikimoriAccessToken');
     localStorage.removeItem('shikimoriRefreshToken');
   }
@@ -115,7 +128,7 @@ export class ShikimoriService {
       if (refresh && (await this.login())) {
         return this.checkLogin(false);
       }
-      this.logoff();
+      this.reportConnectionError();
       return;
     }
     const requestResult = result?.data?.currentUser;
@@ -182,8 +195,7 @@ export class ShikimoriService {
       body: JSON.stringify(data),
     });
     if (!response.ok) {
-      console.log(response);
-      return;
+      throw new Error(`Shikimori: HTTP ${response.status}`);
     }
     const result = await response.json();
     return result;
@@ -201,8 +213,7 @@ export class ShikimoriService {
     headers.append('Authorization', `Bearer ${this.accessToken}`);
     const response = await fetch(getUrl, { headers });
     if (!response.ok) {
-      console.log(response);
-      return;
+      throw new Error(`Shikimori: HTTP ${response.status}`);
     }
     const result = await response.json();
     if (!result[0]) return;
@@ -212,8 +223,7 @@ export class ShikimoriService {
       headers,
     });
     if (!deleteResponse.ok) {
-      console.log(deleteResponse);
-      return;
+      throw new Error(`Shikimori: HTTP ${deleteResponse.status}`);
     }
     return true;
   }

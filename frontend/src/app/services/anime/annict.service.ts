@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { MyAnimeUpdate, WatchStatus } from '@models/anime';
 import { ExtRating } from '@models/components';
-import { DialogueService } from '@services/dialogue.service';
-import { cacheExchange, Client, createClient, fetchExchange, gql } from '@urql/core';
+import { ConnectionStatusService } from '@services/connection-status.service';
+import { readStoredToken } from '@services/global.service';
+import { cacheExchange, Client, fetchExchange, gql } from '@urql/core';
 import { BehaviorSubject } from 'rxjs';
 import { environment } from 'src/environments/environment';
 
@@ -16,11 +17,11 @@ export class AnnictService {
   private client!: Client;
   private userSubject = new BehaviorSubject<string | undefined>(undefined);
 
-  constructor(private dialogue: DialogueService) {
-    this.accessToken = String(localStorage.getItem('annictAccessToken'));
-    if (this.accessToken === 'null') this.accessToken = undefined;
-    this.client = createClient({
+  constructor(private connection: ConnectionStatusService) {
+    this.accessToken = readStoredToken('annictAccessToken') || undefined;
+    this.client = new Client({
       url: this.graphqlUrl,
+      preferGetMethod: false,
       fetchOptions: () => {
         return {
           headers: {
@@ -34,15 +35,23 @@ export class AnnictService {
       this.checkLogin()
         .then(user => {
           this.userSubject.next(user);
+          if (user) {
+            this.connection.clearError('annict');
+          } else {
+            this.reportConnectionError();
+          }
         })
-        .catch(e => {
-          this.dialogue.alert(
-            'Could not connect to Annict, please check your account settings.',
-            'Annict Connection Error',
-          );
-          localStorage.removeItem('annictAccessToken');
+        .catch(() => {
+          this.reportConnectionError();
         });
     }
+  }
+
+  private reportConnectionError() {
+    this.connection.reportError(
+      'annict',
+      'Could not verify your Annict session. It may have expired – reconnect to renew it.',
+    );
   }
 
   private getFetchHeader() {
@@ -61,7 +70,9 @@ export class AnnictService {
           this.accessToken = data.at;
           localStorage.setItem('annictAccessToken', this.accessToken);
           localStorage.setItem('annictClientId', data.ci);
-          this.userSubject.next(await this.checkLogin());
+          const user = await this.checkLogin();
+          this.userSubject.next(user);
+          if (user) this.connection.clearError('annict');
         }
         loginWindow?.close();
         r(undefined);
@@ -82,6 +93,7 @@ export class AnnictService {
   logoff() {
     this.accessToken = '';
     this.userSubject.next(undefined);
+    this.connection.clearError('annict');
     localStorage.removeItem('annictAccessToken');
     localStorage.removeItem('annictClientId');
   }
@@ -212,33 +224,37 @@ export class AnnictService {
   async updateEntry(annictId?: number, data?: Partial<MyAnimeUpdate>) {
     if (!annictId || !this.accessToken) return;
     if (data?.num_watched_episodes) {
-      this.updateProgress(annictId, data?.num_watched_episodes);
+      await this.updateProgress(annictId, data?.num_watched_episodes);
     }
     if (data?.status) {
-      this.updateStatus(annictId, this.statusFromMal(data.status));
+      await this.updateStatus(annictId, this.statusFromMal(data.status));
     }
     if (data?.score) {
-      this.addRating(annictId, data.score);
+      await this.addRating(annictId, data.score);
     }
   }
 
   async updateStatus(annictId?: number, status?: AnnictStatus) {
     if (!annictId || !this.accessToken || !status) return;
-    await fetch(`${this.baseUrl}me/statuses?work_id=${annictId}&kind=${status}`, {
+    const response = await fetch(`${this.baseUrl}me/statuses?work_id=${annictId}&kind=${status}`, {
       method: 'POST',
       headers: this.getFetchHeader(),
     });
+    if (!response.ok) throw new Error(`Annict: HTTP ${response.status}`);
   }
 
   async updateProgress(annictId: number, episodeMin: number, episodeMax?: number) {
     if (!this.accessToken) return;
     const episodes = await this.getEpisodeIds(annictId, episodeMin, episodeMax);
-    for (const episode of episodes) {
-      fetch(`${this.baseUrl}me/records?episode_id=${episode}`, {
-        method: 'POST',
-        headers: this.getFetchHeader(),
-      });
-    }
+    await Promise.all(
+      episodes.map(async episode => {
+        const response = await fetch(`${this.baseUrl}me/records?episode_id=${episode}`, {
+          method: 'POST',
+          headers: this.getFetchHeader(),
+        });
+        if (!response.ok) throw new Error(`Annict: HTTP ${response.status}`);
+      }),
+    );
   }
 
   async addRating(annictId: number, rating: number) {
@@ -249,10 +265,11 @@ export class AnnictService {
       `${'★'.repeat(Math.max(0, rating))}${'☆'.repeat(Math.max(0, 10 - rating))}
       _rated on myani.li_`,
     );
-    fetch(
+    const response = await fetch(
       `${this.baseUrl}me/reviews?work_id=${annictId}&rating_overall_state=${annictRating}&body=${body}`,
       { method: 'POST', headers: this.getFetchHeader() },
     );
+    if (!response.ok) throw new Error(`Annict: HTTP ${response.status}`);
   }
 
   async getEpisodeIds(

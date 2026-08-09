@@ -1,5 +1,6 @@
-FROM webdevops/php-apache:8.3-alpine
+FROM webdevops/php-apache:8.5-alpine
 ADD . /app
 WORKDIR /app
-VOLUME [ "/app/users.csv" ]
+RUN mkdir -p /dbs && chmod 777 /dbs
+VOLUME [ "/app/users.csv", "/dbs" ]
 RUN composer install

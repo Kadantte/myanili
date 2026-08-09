@@ -1,7 +1,10 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { SettingsComponent } from '@app/settings/settings.component';
+import { AnilistUser } from '@models/anilist';
 import { MalUser } from '@models/user';
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap';
+import { AnilistService } from '@services/anilist.service';
+import { ConnectionStatusService } from '@services/connection-status.service';
 import { MalService } from '@services/mal.service';
 import { NavbarService } from '@services/navbar.service';
 
@@ -9,6 +12,7 @@ import { NavbarService } from '@services/navbar.service';
   selector: 'myanili-navbar-top',
   templateUrl: './top.component.html',
   styleUrls: ['./top.component.scss'],
+  changeDetection: ChangeDetectionStrategy.Eager,
   standalone: false,
 })
 export class NavbarTopComponent {
@@ -16,6 +20,8 @@ export class NavbarTopComponent {
     public malService: MalService,
     private modal: NgbModal,
     private navbarService: NavbarService,
+    private alService: AnilistService,
+    private connectionStatus: ConnectionStatusService,
   ) {
     this.malService.loggedIn.subscribe(loggedIn => {
       this.loggedIn = loggedIn;
@@ -26,10 +32,18 @@ export class NavbarTopComponent {
     this.navbarService.module.subscribe(module => {
       this.module = module;
     });
+    this.alService.user.subscribe(user => {
+      this.alUser = user;
+    });
+    this.connectionStatus.hasErrors$.subscribe(hasErrors => {
+      this.connectionErrors = hasErrors;
+    });
   }
   loggedIn: string | false = 'loading';
   user?: MalUser;
   module?: 'anime' | 'manga';
+  alUser?: AnilistUser;
+  connectionErrors = false;
 
   async showSettings() {
     this.modal.open(SettingsComponent);

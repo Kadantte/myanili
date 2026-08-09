@@ -1,0 +1,25 @@
+<div class="row">
+  <div class="col-5">Trakt.tv</div>
+  <div class="col-7">
+    @if (traktLoggedIn) {
+      <myanili-icon-trakt class="me-1 link-trakt"></myanili-icon-trakt>
+      <a href="https://trakt.tv/users/{{ traktLoggedIn }}" target="_blank">{{ traktLoggedIn }}</a>
+      <myanili-icon
+        class="cursor-pointer"
+        name="x"
+        size="20"
+        (click)="traktLogoff()"
+      ></myanili-icon>
+    } @else {
+      <myanili-connection-error service="trakt"></myanili-connection-error>
+      <button class="btn btn-sm btn-primary" (click)="traktConnect()" [disabled]="traktLoading">
+        @if (traktLoading) {
+          <myanili-icon-loading></myanili-icon-loading>
+        } @else {
+          <myanili-icon-trakt></myanili-icon-trakt>
+        }
+        Connect
+      </button>
+    }
+  </div>
+</div>

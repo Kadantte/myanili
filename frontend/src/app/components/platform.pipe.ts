@@ -16,8 +16,8 @@ export class PlatformPipe implements PipeTransform {
     },
     {
       id: 'azuki',
-      name: 'azuki',
-      urlprefix: 'https://azuki.co/series/',
+      name: 'omoi',
+      urlprefix: 'https://omoi.com/series/',
     },
     {
       id: 'kobo',
@@ -43,6 +43,11 @@ export class PlatformPipe implements PipeTransform {
       id: 'mplus',
       name: 'MANGA Plus',
       urlprefix: 'https://mangaplus.shueisha.co.jp/titles/',
+    },
+    {
+      id: 'mmil',
+      name: 'MANGA MILLION',
+      urlprefix: 'https://mangamillion.shueisha.co.jp/en/title/',
     },
     {
       id: 'mup',
@@ -103,6 +108,16 @@ export class PlatformPipe implements PipeTransform {
       id: 'comikey',
       name: 'Comikey',
       urlprefix: 'https://comikey.com/comics/title/',
+    },
+    {
+      id: 'unx',
+      name: 'U-NEXT',
+      urlprefix: 'https://video.unext.jp/book/title/',
+    },
+    {
+      id: 'cmic',
+      name: 'Coolmic',
+      urlprefix: 'https://www.coolmic.me/titles/',
     },
     {
       id: '',

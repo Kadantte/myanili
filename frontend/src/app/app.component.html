@@ -1,17 +1,28 @@
 <myanili-navbar-top></myanili-navbar-top>
-<ng-container *ngIf="loggedIn && loggedIn != '***loading***'">
-  <router-outlet></router-outlet>
-  <div class="busy-overlay" *ngIf="busy">
-    <myanili-icon *ngIf="!loadingPercent" name="loading" [size]="64"></myanili-icon>
-    <myanili-icon-progress
-      *ngIf="loadingPercent"
-      [percent]="loadingPercent"
-      [size]="64"
-      name="loading"
-    ></myanili-icon-progress>
+@if (loggedIn === '***loading***') {
+  <div class="busy-overlay">
+    <myanili-icon name="loading" [size]="64"></myanili-icon>
   </div>
-</ng-container>
-<div class="buffer" *ngIf="!hideNavbar"></div>
-<myanili-navbar-bottom *ngIf="loggedIn && loggedIn != '***loading***'"></myanili-navbar-bottom>
+} @else {
+  <router-outlet></router-outlet>
+  @if (busy) {
+    <div class="busy-overlay">
+      @if (!loadingPercent) {
+        <myanili-icon name="loading" [size]="64"></myanili-icon>
+      }
+      @if (loadingPercent) {
+        <myanili-icon-progress
+          [percent]="loadingPercent"
+          [size]="64"
+          name="loading"
+        ></myanili-icon-progress>
+      }
+    </div>
+  }
+}
+@if (!hideNavbar) {
+  <div class="buffer"></div>
+}
+<myanili-navbar-bottom></myanili-navbar-bottom>
 
 <myanili-toaster></myanili-toaster>

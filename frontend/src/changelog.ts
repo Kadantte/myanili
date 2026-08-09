@@ -1,8 +1,244 @@
 export const changelog: Changelog = {
   changes: [
     {
+      version: '7.2.0',
+      date: new Date('2026-08-07'),
+      features: [
+        'Manga: Add platform MANGA MILLION',
+        'Navigation: going back keeps the view you came from – search results, lists and details pages are no longer rebuilt and reloaded, including their scroll position',
+      ],
+      fixes: [
+        'Navigation: opening a view no longer inherits the scroll position of the previous one, new views start at the top',
+      ],
+    },
+    {
+      version: '7.1.0',
+      date: new Date('2026-08-07'),
+      features: [
+        'Anime/Manga: search AniList by title from the edit form, like the other external databases',
+        'Anime/Manga: external ID fields select their content on focus, so it can be copied or overwritten right away',
+        'Anime/Manga: paste a link from AniList, MangaUpdates, aniSearch and the others into an ID field – the id is extracted for you',
+      ],
+      fixes: [
+        'Watchlist: "airing later today" divider no longer counted every episode as upcoming once Japan rolled over to the next day',
+        'Watchlist/Details: loading overlay no longer stays on screen after a failed action',
+        'Manga: publisher moved next to the platform in the status box, linked to its website',
+        'Manga: platform and publisher logos were invisible on the details page',
+        'Bangumi: removing a rating on MyAnimeList now also clears it on Bangumi',
+        'Bangumi: retry transient gateway errors on reads instead of showing empty results',
+      ],
+      other: ['Smaller Docker image based on alpine'],
+    },
+    {
+      version: '7.0.0',
+      date: new Date('2026-07-23'),
+      features: [
+        'Bangumi: OAuth login, aligned with the other providers (silent token refresh, plain tab instead of a popup)',
+        'Bangumi: auto-match anime/manga on load, plus manual title search in the edit forms',
+        'Bangumi: sync watch/read status, score and episode/chapter/volume progress',
+        'Settings: view-related settings move to the views they affect – a gear button (top left) opens a popup with a short description for every setting',
+        'Accounts: no more automatic logoff when a session expires – a red badge on the user icon and a note in the connection list show which service needs a manual reconnect',
+        'Watchlist: optional card layout with poster thumbnails and a large check button, switchable via the new per-view settings',
+        'Watchlist: divider between already released episodes and shows airing later today',
+        'Watchlist: new setting to hide shows that are about to start airing',
+        'Details: restructured layout – alternative titles as subtitle, meta line, genre badges, status card with progress and airing info, compact fact list and stat tiles',
+        'Details: links to external databases as compact, uniform icon tiles with ratings; official website as its own entry',
+        'Loading: skeleton screens replace the blocking loading overlay on details pages, lists and the watchlist',
+      ],
+      fixes: [
+        'Manga: restore missing Bangumi rating/link on details page',
+        'Sync: no more error toasts for providers that have no id for the current title',
+        'Accounts: no more false session errors for services that were never connected',
+        'Details: streaming provider logo now actually links to the stream',
+        'Watchlist: more spacing between rows to avoid checking off the wrong show',
+      ],
+    },
+    {
+      version: '6.0.0',
+      date: new Date('2026-07-08'),
+      features: [
+        'Watchlist: show planned titles shortly after they start airing, so you can start watching directly from there',
+        'Character: show gender and age',
+        'Character/Person: link mentions of other characters or staff in the description to their myanili profile',
+      ],
+      fixes: ['Character: Voice Actors tab was always empty'],
+      other: [
+        'Remove Jikan dependency: character, staff, studio and relation data now come from AniList',
+      ],
+    },
+    {
+      version: '5.0.0',
+      date: new Date('2026-07-06'),
+      features: ['Season Planner: review new season shows with a Tinder-style swipe UI'],
+      fixes: ['Anime/Manga: fix change-detection error in related media sections'],
+      other: ['Update dependencies', 'Migrate MangaBaka API URL'],
+    },
+    {
+      version: '4.1.0',
+      date: new Date('2026-04-26'),
+      fixes: [
+        'MangaBaka: correctly add new entries to library (was failing when series not yet tracked)',
+      ],
+    },
+    {
+      version: '4.0.0',
+      date: new Date('2026-04-18'),
+      features: [
+        'Allow browsing without login',
+        'Redirect home to watchlist when logged in',
+        'Switch from hash-based to path-based routing',
+      ],
+      other: [
+        'Improve reliability: fan-outs now use Promise.allSettled with centralized error handling',
+      ],
+    },
+    {
+      version: '3.3.1',
+      date: new Date('2026-03-08'),
+      other: [
+        'Change versioning schema: Even though we are now on version 3, nothing really changed. The first release was named version 2 because it was based on another app that I deemed version 1.',
+      ],
+    },
+    {
+      version: '3.3.0',
+      date: new Date('2026-03-06'),
+      fixes: ['MangaBaka: implement OAuth login'],
+    },
+    {
+      version: '3.2.0',
+      date: new Date('2026-02-21'),
+      fixes: ['aniDB: Bring back ratings', 'Optimize colours of some logos and icons'],
+      other: ['Update dependencies'],
+    },
+    {
+      version: '3.1.0',
+      date: new Date('2026-02-17'),
+      fixes: ['Manga: mangaupdates rating not showing up on details page'],
+      other: ['Update dependencies'],
+    },
+    {
+      version: '3.0.0',
+      date: new Date('2026-01-29'),
+      features: [
+        'Manga: MangaBaka integration - automatic library synchronization',
+        'Manga: MangaBaka ratings display on details page',
+        'Manga: Auto-fetch MangaBaka series IDs via AniList/MAL mapping',
+        'Manga: Extract Anime News Network and Anime-Planet IDs from MangaBaka',
+        'Manga: Links to MangaBaka and Anime-Planet on manga details page',
+      ],
+      other: ['Update dependencies'],
+    },
+    {
+      version: '2.35.2',
+      date: new Date('2026-01-26'),
+      fixes: ['Anime/Manga: restore "Remove from List" button in edit modal'],
+    },
+    {
+      version: '2.35.1',
+      date: new Date('2026-01-12'),
+      fixes: ['fix deployment'],
+    },
+    {
+      version: '2.35.0',
+      date: new Date('2026-01-12'),
+      features: ['Anime/Manga: show user start and end date', 'Anime/Manga: move edits into popup'],
+      other: ['Update dependencies'],
+    },
+    {
+      version: '2.34.4',
+      date: new Date('2025-12-09'),
+      fixes: ['Anime: popups for external connections not working'],
+    },
+    {
+      version: '2.34.3',
+      date: new Date('2025-12-02'),
+      fixes: ['Feed: fix text parsing for some edge cases'],
+      other: ['Update dependencies'],
+    },
+    {
+      version: '2.34.2',
+      date: new Date('2025-11-22'),
+      features: ['Feed: Show users who liked an activity'],
+      other: ['Update dependencies'],
+    },
+    {
+      version: '2.34.1',
+      date: new Date('2025-11-21'),
+      features: ['Feed: Optimizations'],
+    },
+    {
+      version: '2.34.0',
+      date: new Date('2025-11-19'),
+      features: ['Anilist Activity Feed', 'Manga Platforms: Rename Azuki to Omoi'],
+    },
+    {
+      version: '2.33.10',
+      date: new Date('2025-10-06'),
+      fixes: ['Login: add loading state to login button'],
+      other: ['Update dependencies'],
+    },
+    {
+      version: '2.33.9',
+      date: new Date('2025-09-08'),
+      fixes: ['Login: need reload to show user for MAL and Livechart'],
+      other: ['Update dependencies'],
+    },
+    {
+      version: '2.33.8',
+      date: new Date('2025-06-26'),
+      fixes: ['Anisearch: fix OAuth authentication by implementing PKCE support'],
+    },
+    {
+      version: '2.33.7',
+      date: new Date('2025-06-19'),
+      fixes: [
+        "Manga: don't set completed status after first read chapter",
+        'Manga: include unavailable chapters from MangaDex for volume/chapter mapping',
+      ],
+    },
+    {
+      version: '2.33.6',
+      date: new Date('2025-06-04'),
+      features: ['Trakt: auto map via simkl and imdb'],
+    },
+    {
+      version: '2.33.5',
+      date: new Date('2025-05-26'),
+      features: ['Trakt: add newly introduced drop functionality'],
+    },
+    {
+      version: '2.33.4',
+      date: new Date('2025-05-09'),
+      fixes: ['Shikimori: disable login if token refresh fails'],
+    },
+    {
+      version: '2.33.3',
+      date: new Date('2025-05-05'),
+      fixes: ['Anilist: rewatching media are set to completed'],
+      features: ['Add streaming platform WeTV (@nattadasu)'],
+    },
+    {
+      version: '2.33.2',
+      date: new Date('2025-05-03'),
+      fixes: ['aniSearch: Fix entry updates to not change visibility'],
+    },
+    {
+      version: '2.33.1',
+      date: new Date('2025-05-01'),
+      fixes: ['aniSearch: Fix entry updates to not remove data'],
+    },
+    {
+      version: '2.33.0',
+      date: new Date('2025-05-01'),
+      features: [
+        'Add support for aniSearch Accounts',
+        'Add additional streaming and manga platforms (@nattadasu)',
+      ],
+      other: ['Update dependencies'],
+    },
+    {
       version: '2.32.0',
-      date: new Date('2025-03-25'),
+      date: new Date('2025-04-16'),
       fixes: ['Kitsu: fix auto logoff'],
       features: ['Anime: add promo videos'],
       other: ['Update Angular to 19'],
@@ -156,7 +392,7 @@ export const changelog: Changelog = {
         'Anime details: add expiration date to streaming tab (if available)',
         'Share links and text to MyAniLi (may need to reinstall the app)',
       ],
-      fixes: ['Mangadex: request error', 'AniSearch: live action links'],
+      fixes: ['Mangadex: request error', 'aniSearch: live action links'],
     },
     {
       version: '2.27.1',

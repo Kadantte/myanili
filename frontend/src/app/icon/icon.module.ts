@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
+import { provideHttpClient, withInterceptorsFromDi, withXhr } from '@angular/common/http';
 import { NgModule } from '@angular/core';
 import { NgCircleProgressModule } from 'ng-circle-progress';
 
@@ -11,6 +11,7 @@ import { AnnComponent } from './ann/ann.component';
 import { AnnictIconComponent } from './annict/annict.component';
 import { ApComponent } from './ap/ap.component';
 import { BakamangaIconComponent } from './bakamanga/bakamanga.component';
+import { BangumiIconComponent } from './bangumi/bangumi.component';
 import { FandomIconComponent } from './fandom/fandom.component';
 import { IconComponent } from './icon.component';
 import { KitsuIconComponent } from './kitsu/kitsu.component';
@@ -18,6 +19,7 @@ import { LivechartIconComponent } from './livechart/livechart.component';
 import { LoadingIconComponent } from './loading/loading.component';
 import { MalIconComponent } from './mal/mal.component';
 import { MangaPassionComponent } from './manga-passion/manga-passion.component';
+import { MangabakaIconComponent } from './mangabaka/mangabaka.component';
 import { MangadexIconComponent } from './mangadex/mangadex.component';
 import { ProgressIconComponent } from './progress/progress.component';
 import { ShikimoriIconComponent } from './shikimori/shikimori.component';
@@ -35,10 +37,12 @@ import { TraktIconComponent } from './trakt/trakt.component';
     AnnComponent,
     AnnictIconComponent,
     BakamangaIconComponent,
+    BangumiIconComponent,
     FandomIconComponent,
     KitsuIconComponent,
     LivechartIconComponent,
     MalIconComponent,
+    MangabakaIconComponent,
     MangadexIconComponent,
     SimklIconComponent,
     SpotifyIconComponent,
@@ -60,10 +64,12 @@ import { TraktIconComponent } from './trakt/trakt.component';
     AnnictIconComponent,
     ApComponent,
     BakamangaIconComponent,
+    BangumiIconComponent,
     FandomIconComponent,
     KitsuIconComponent,
     LivechartIconComponent,
     MalIconComponent,
+    MangabakaIconComponent,
     MangadexIconComponent,
     MangaPassionComponent,
     ShikimoriIconComponent,
@@ -94,6 +100,6 @@ import { TraktIconComponent } from './trakt/trakt.component';
       outerStrokeLinecap: 'butt',
     }),
   ],
-  providers: [provideHttpClient(withInterceptorsFromDi())],
+  providers: [provideHttpClient(withXhr(), withInterceptorsFromDi())],
 })
 export class IconModule {}

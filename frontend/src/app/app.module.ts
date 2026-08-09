@@ -1,17 +1,20 @@
 import { NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BrowserModule, Title } from '@angular/platform-browser';
-import { RouterModule, Routes } from '@angular/router';
+import { RouteReuseStrategy, RouterModule, Routes } from '@angular/router';
 import { ServiceWorkerModule } from '@angular/service-worker';
 import { ComponentsModule } from '@components/components.module';
 import { ExternalModule } from '@external/external.module';
 import { IconModule } from '@icon/icon.module';
 import { NgbModule } from '@ng-bootstrap/ng-bootstrap';
+import { CachedRouteReuseStrategy } from '@services/route-reuse.strategy';
 import { AngularSvgIconModule } from 'angular-svg-icon';
 import { environment } from 'src/environments/environment';
 
 import { AppComponent } from './app.component';
 import { DirectivesModule } from './directives/directives.module';
+import { authGuard } from './guards/auth.guard';
+import { homeGuard } from './guards/home.guard';
 import { NavbarModule } from './navbar/navbar.module';
 import { SettingsModule } from './settings/settings.module';
 
@@ -32,7 +35,12 @@ const routes: Routes = [
     path: 'person',
     loadChildren: () => import('./person/person.module').then(m => m.PersonModule),
   },
-  { path: '', redirectTo: '/anime/watchlist', pathMatch: 'full' },
+  {
+    path: 'feed',
+    canActivate: [authGuard],
+    loadChildren: () => import('./feed/feed.module').then(m => m.FeedModule),
+  },
+  { path: '', canActivate: [homeGuard], children: [] },
 ];
 
 @NgModule({
@@ -48,10 +56,10 @@ const routes: Routes = [
     ExternalModule,
     ComponentsModule,
     NavbarModule,
-    RouterModule.forRoot(routes, { useHash: true }),
+    RouterModule.forRoot(routes),
     SettingsModule,
   ],
-  providers: [Title],
+  providers: [Title, { provide: RouteReuseStrategy, useExisting: CachedRouteReuseStrategy }],
 
   bootstrap: [AppComponent],
 })

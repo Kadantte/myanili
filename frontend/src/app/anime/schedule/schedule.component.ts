@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { DateTimeFrom } from '@components/luxon-helper';
 import { Anime, daysToLocal } from '@models/anime';
 import { Weekday } from '@models/components';
@@ -12,6 +12,7 @@ import { Observable, switchMap } from 'rxjs';
   selector: 'myanili-schedule',
   templateUrl: './schedule.component.html',
   styleUrls: ['./schedule.component.scss'],
+  changeDetection: ChangeDetectionStrategy.Eager,
   standalone: false,
 })
 export class ScheduleComponent {
@@ -33,18 +34,24 @@ export class ScheduleComponent {
           this.season = season.season;
           this.glob.busy();
           return new Observable<Array<Partial<Anime>> | undefined>(observer => {
-            this.update(season.year, season.season).then(animes => {
-              observer.next(animes);
-              observer.complete();
-            });
+            this.update(season.year, season.season).then(
+              animes => {
+                observer.next(animes);
+                observer.complete();
+              },
+              () => {
+                observer.next(undefined);
+                observer.complete();
+              },
+            );
           });
         }),
       )
       .subscribe(animes => {
+        this.glob.notbusy();
         if (animes) {
           const seasons = ['Winter', 'Spring', 'Summer', 'Fall'];
           this.glob.setTitle(`${this.year} ${seasons[this.season || 0]} – Schedule`);
-          this.glob.notbusy();
           this.animes = animes;
         }
       });
@@ -53,7 +60,9 @@ export class ScheduleComponent {
   async update(year?: number, season?: number) {
     if (!this.year || (this.season !== 0 && !this.season)) return;
     const allAnime = await this.animeService.season(this.year, this.season).catch(() => []);
-    if (year && season && (year !== this.year || season !== this.season)) return;
+    if (year && season && (year !== this.year || season !== this.season)) {
+      return;
+    }
     return allAnime.sort(
       (a, b) =>
         Number(

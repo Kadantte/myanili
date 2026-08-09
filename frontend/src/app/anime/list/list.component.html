@@ -1,23 +1,42 @@
-<myanili-header [header]="title"></myanili-header>
+<myanili-header
+  [header]="title"
+  [settings]="['language', 'layout', 'scoreDisplay']"
+></myanili-header>
 <section>
-  <myanili-anime-list
-    *ngIf="(settings.layout$ | async) === 'list'"
-    [animes]="animes"
-  ></myanili-anime-list>
-  <myanili-anime-grid
-    *ngIf="(settings.layout$ | async) !== 'list'"
-    [animes]="animes"
-  ></myanili-anime-grid>
-  <div
-    *ngIf="animes.length && !loadedAll"
-    style="position: absolute; margin-top: -500px; padding-top: 450px; height: 50px"
-    inViewport
-    (inViewportAction)="handleScroll($event)"
-  >
-    &nbsp;
-  </div>
-  <div *ngIf="loading" class="text-center">
-    <myanili-icon name="loading"></myanili-icon>
-    Loading more...
-  </div>
+  @if (initialLoading) {
+    @if ((settings.layout$ | async) === 'list') {
+      <div class="skeleton-rows container-fluid">
+        @for (i of skeletons; track i) {
+          <div class="skeleton"></div>
+        }
+      </div>
+    } @else {
+      <div class="skeleton-grid m-2">
+        @for (i of skeletons; track i) {
+          <div class="skeleton"></div>
+        }
+      </div>
+    }
+  }
+  @if (!initialLoading && (settings.layout$ | async) === 'list') {
+    <myanili-anime-list [animes]="animes"></myanili-anime-list>
+  }
+  @if (!initialLoading && (settings.layout$ | async) !== 'list') {
+    <myanili-anime-grid [animes]="animes"></myanili-anime-grid>
+  }
+  @if (animes.length && !loadedAll) {
+    <div
+      style="position: absolute; margin-top: -500px; padding-top: 450px; height: 50px"
+      inViewport
+      (inViewportAction)="handleScroll($event)"
+    >
+      &nbsp;
+    </div>
+  }
+  @if (loading) {
+    <div class="text-center">
+      <myanili-icon name="loading"></myanili-icon>
+      Loading more...
+    </div>
+  }
 </section>

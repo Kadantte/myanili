@@ -1,0 +1,31 @@
+<div class="row">
+  <div class="col-5">Shikimori</div>
+  <div class="col-7">
+    @if (shikimoriLoggedIn) {
+      <myanili-icon-shikimori class="me-1"></myanili-icon-shikimori>
+      <a href="https://shikimori.io/{{ shikimoriLoggedIn.nickname }}" target="_blank">{{
+        shikimoriLoggedIn.nickname
+      }}</a>
+      <myanili-icon
+        class="cursor-pointer"
+        name="x"
+        size="20"
+        (click)="shikimoriLogoff()"
+      ></myanili-icon>
+    } @else {
+      <myanili-connection-error service="shikimori"></myanili-connection-error>
+      <button
+        class="btn btn-sm btn-primary"
+        (click)="shikimoriConnect()"
+        [disabled]="shikimoriLoading"
+      >
+        @if (shikimoriLoading) {
+          <myanili-icon-loading></myanili-icon-loading>
+        } @else {
+          <myanili-icon-shikimori></myanili-icon-shikimori>
+        }
+        Connect
+      </button>
+    }
+  </div>
+</div>

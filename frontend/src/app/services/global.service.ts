@@ -3,6 +3,7 @@ import { Title } from '@angular/platform-browser';
 import { DateTimeFrom } from '@components/luxon-helper';
 import { WeekdayNumbers } from 'luxon';
 import { BehaviorSubject } from 'rxjs';
+import { environment } from 'src/environments/environment';
 
 import packageJson from '../../../package.json';
 import { changelog } from '../../changelog';
@@ -11,7 +12,7 @@ import { changelog } from '../../changelog';
   providedIn: 'root',
 })
 export class GlobalService {
-  private isBusySubject = new BehaviorSubject<boolean>(true);
+  private isBusySubject = new BehaviorSubject<boolean>(false);
   private loadingPercentSubject = new BehaviorSubject<number>(0);
   private darkModeSubject = new BehaviorSubject<boolean>(false);
   private readonly titlePostfix = ' – MyAniLi';
@@ -54,6 +55,15 @@ export class GlobalService {
       );
       this.lastPosition = currentPositon;
     };
+  }
+
+  /**
+   * Scrolls the window to an absolute position without the scroll listener
+   * mistaking the jump for the user scrolling down and hiding the navbar.
+   */
+  scrollTo(position: number) {
+    this.lastPosition = position;
+    window.scrollTo(0, position);
   }
 
   setTitle(title: string) {
@@ -109,6 +119,43 @@ export class GlobalService {
     const rounded = Math.round(day);
     return (rounded % 7 || 7) as WeekdayNumbers;
   }
+
+  /**
+   * Checks if the backend is available with retry logic.
+   * Retries up to maxRetries times with delay between attempts.
+   * @param maxRetries Maximum number of retry attempts (default: 5)
+   * @param retryDelay Delay in milliseconds between retries (default: 1000)
+   * @returns Promise that resolves to true if backend is available, false otherwise
+   */
+  async checkBackendAvailability(maxRetries = 5, retryDelay = 1000): Promise<boolean> {
+    const backendUrl = environment.backend;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Try to fetch the backend root to check if it's available
+        // Using GET request with credentials and no-cache
+        const response = await fetch(backendUrl, {
+          method: 'GET',
+          credentials: 'include',
+          cache: 'no-cache',
+        });
+
+        // If we get any response (even error status), backend is reachable
+        if (response.status >= 200 && response.status < 600) {
+          return true;
+        }
+      } catch (error) {
+        // If fetch fails (network error, timeout, etc.), backend is not reachable
+        // Continue to retry unless this was the last attempt
+        if (attempt < maxRetries) {
+          await this.sleep(retryDelay);
+          continue;
+        }
+      }
+    }
+
+    return false;
+  }
 }
 
 export function getLastXoClock(hour = 8) {
@@ -120,4 +167,24 @@ export function getLastXoClock(hour = 8) {
     millisecond: 0,
   });
   return now.diff(eightAm).milliseconds > 0 ? eightAm : eightAm.minus({ days: 1 });
+}
+
+export function cleanupObject<T extends object>(obj: T): Partial<T> {
+  for (const key of Object.keys(obj)) {
+    // tslint:disable-next-line no-any
+    if ((obj as any)[key] === undefined) {
+      // tslint:disable-next-line no-any
+      delete (obj as any)[key];
+    }
+  }
+  return obj as Partial<T>;
+}
+
+/**
+ * Read a credential from localStorage, treating missing values and the literal
+ * string "null" (a legacy artifact of `String(localStorage.getItem(...))`) as empty.
+ */
+export function readStoredToken(key: string): string {
+  const value = localStorage.getItem(key);
+  return value && value !== 'null' && value !== 'undefined' ? value : '';
 }

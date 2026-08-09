@@ -77,6 +77,190 @@ export type AnilistNotificationType =
   | 'MEDIA_MERGE'
   | 'MEDIA_DELETION';
 
+export interface AnilistActivity {
+  id: number;
+  type: string;
+  createdAt: number;
+  user: {
+    id: number;
+    name: string;
+    avatar: {
+      medium: string;
+    };
+  };
+  text?: string;
+  status?: string;
+  progress?: string;
+
+  // MessageActivity support
+  message?: string;
+  messenger?: {
+    id: number;
+    name: string;
+    avatar: {
+      medium: string;
+    };
+  };
+  recipient?: {
+    id: number;
+    name: string;
+    avatar: {
+      medium: string;
+    };
+  };
+
+  media?: {
+    id: number;
+    idMal?: number;
+    type: 'ANIME' | 'MANGA';
+    startDate: {
+      year: number;
+    };
+    format?: string;
+    title: {
+      userPreferred: string;
+    };
+    coverImage: {
+      large: string;
+    };
+  };
+  replies?: Array<{
+    id: number;
+    text: string;
+    createdAt: number;
+    user: {
+      id: number;
+      name: string;
+      avatar: {
+        medium: string;
+      };
+    };
+    likeCount: number;
+    isLiked: boolean;
+    likes?: Array<{
+      id: number;
+      name: string;
+      avatar: {
+        medium: string;
+      };
+    }>;
+  }>;
+  likes?: Array<{
+    id: number;
+    name: string;
+    avatar: {
+      medium: string;
+    };
+  }>;
+  replyCount: number;
+  likeCount: number;
+  isLiked: boolean;
+  siteUrl: string;
+}
+
+export interface AnilistName {
+  full: string;
+  native?: string;
+  alternative?: string[];
+}
+
+export interface AnilistMediaRef {
+  id: number;
+  idMal?: number;
+  type: 'ANIME' | 'MANGA';
+  title: string;
+  image?: string;
+  format?: string;
+  source?: string;
+}
+
+export interface AnilistMediaSearchResult {
+  id: number;
+  idMal?: number;
+  title: string;
+  year?: number;
+  image?: string;
+  description?: string;
+  genres?: string[];
+  format?: string;
+}
+
+export interface AnilistCharacterDetail {
+  id: number;
+  name: AnilistName;
+  image?: string;
+  description?: string;
+  gender?: string;
+  age?: string;
+  siteUrl?: string;
+}
+
+export interface AnilistCharacterMediaRole {
+  role: 'MAIN' | 'SUPPORTING' | 'BACKGROUND';
+  media: AnilistMediaRef;
+}
+
+export interface AnilistCharacterVoiceActor {
+  language: string;
+  actor: { id: number; name: string; image?: string };
+}
+
+export interface AnilistStaffDetail {
+  id: number;
+  name: AnilistName;
+  image?: string;
+  description?: string;
+  primaryOccupations?: string[];
+  dateOfBirth?: { year?: number; month?: number; day?: number };
+  siteUrl?: string;
+}
+
+export interface AnilistStaffVoiceRole {
+  role: 'MAIN' | 'SUPPORTING' | 'BACKGROUND';
+  character: { id: number; name: string; image?: string };
+  media: AnilistMediaRef;
+}
+
+export interface AnilistStaffMediaRole {
+  role?: string;
+  media: AnilistMediaRef;
+}
+
+export interface AnilistStudioDetail {
+  id: number;
+  name: string;
+  siteUrl?: string;
+}
+
+export interface AnilistWorkCharacter {
+  character: { id: number; name: string; image?: string };
+  role: 'MAIN' | 'SUPPORTING' | 'BACKGROUND';
+  voiceActors: Array<{ id: number; name: string; image?: string; language?: string }>;
+}
+
+export interface AnilistWorkStaff {
+  person: { id: number; name: string; image?: string };
+  positions: string[];
+}
+
+export interface AnilistWorkRelation {
+  relationType: string;
+  node: { id: number; idMal?: number; type: 'ANIME' | 'MANGA'; title: string };
+}
+
+export function localizeAnilistLinks(html: string): string {
+  return html
+    .replace(/https?:\/\/anilist\.co\/character\/(\d+)(?:\/[^"'\s)]*)?/g, '/character/$1')
+    .replace(/https?:\/\/anilist\.co\/staff\/(\d+)(?:\/[^"'\s)]*)?/g, '/person/$1');
+}
+
+export function formatRelationType(relationType: string): string {
+  return relationType
+    .split('_')
+    .map(word => word.charAt(0) + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
 export function statusFromMal(
   malStatus?: WatchStatus | ReadStatus,
   repeating = false,
